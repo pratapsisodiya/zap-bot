@@ -77,11 +77,9 @@ export async function GET(request: Request) {
                 let botResult;
                 let service: "meeting-baas" | "livekit" = "meeting-baas";
 
-                // Check if it's a LiveKit meeting
-                const isLiveKit = meeting.meetingUrl?.startsWith("livekit:") || 
-                                (!meeting.meetingUrl?.includes("zoom.us") && 
-                                 !meeting.meetingUrl?.includes("meet.google") && 
-                                 !meeting.meetingUrl?.includes("teams.microsoft"));
+                // Only treat as LiveKit if explicitly flagged — avoids misrouting normal https meeting URLs
+                const isLiveKit = meeting.meetingUrl?.startsWith("livekit:") ||
+                                  meeting.botService === "livekit";
 
                 if (isLiveKit) {
                     const { dispatchLiveKitBot } = await import("@/lib/livekit-bot");

@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { Suspense, useEffect, useMemo, useState } from "react";
 import Calendar from "react-calendar";
 import {
   Calendar as CalendarIcon,
@@ -71,7 +71,7 @@ const fadeUpItem: Variants = {
   visible: { opacity: 1, y: 0, transition: { duration: 0.5, ease: [0.16, 1, 0.3, 1] } }
 };
 
-export default function CalendarPage() {
+function CalendarPageInner() {
   const searchParams = useSearchParams();
   const [connected, setConnected] = useState(false);
   const [loading, setLoading] = useState(true);
@@ -486,5 +486,13 @@ export default function CalendarPage() {
         .custom-scrollbar::-webkit-scrollbar-thumb:hover { background: #94a3b8; }
       `}</style>
     </div>
+  );
+}
+
+export default function CalendarPage() {
+  return (
+    <Suspense fallback={<div className="flex h-screen items-center justify-center"><div className="h-8 w-8 animate-spin rounded-full border-2 border-blue-500 border-t-transparent" /></div>}>
+      <CalendarPageInner />
+    </Suspense>
   );
 }

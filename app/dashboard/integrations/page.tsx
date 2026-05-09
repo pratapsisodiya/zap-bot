@@ -152,6 +152,18 @@ export default function IntegrationsPage() {
     }, []);
 
     const connectIntegration = useCallback(async (integrationId: string) => {
+        // Calendar uses Google OAuth redirect — don't hit the generic API
+        if (integrationId === "calendar") {
+            window.location.href = "/api/calendar/connect";
+            return;
+        }
+
+        // Slack uses its own OAuth redirect
+        if (integrationId === "slack") {
+            window.location.href = "/api/slack/oauth";
+            return;
+        }
+
         setIsConnecting(integrationId);
 
         try {
@@ -164,8 +176,6 @@ export default function IntegrationsPage() {
                 const error = await response.json();
                 throw new Error(error.error || "Failed to connect");
             }
-
-            const data = await response.json();
 
             setIntegrationStatuses(prev => {
                 const newMap = new Map(prev);

@@ -31,11 +31,8 @@ export async function canUserSendBot(userId: string) {
         return { allowed: false, reason: 'Your subscription has expired. Please renew to continue.' }
     }
 
-    const limits = PLAN_LIMITS[user.currentPlan]
-
-    if (!limits) {
-        return { allowed: false, reason: 'Invalid subscription plan' }
-    }
+    const plan = user.currentPlan || "free"
+    const limits = PLAN_LIMITS[plan] ?? PLAN_LIMITS["free"]!
 
     const meetingsCount = user.meetingsThisMonth || 0
     if (limits.meetings !== -1 && meetingsCount >= limits.meetings) {
@@ -61,11 +58,8 @@ export async function canUserChat(userId: string) {
         return { allowed: false, reason: 'Your subscription has expired. Please renew to continue chat.' }
     }
 
-    const limits = PLAN_LIMITS[user.currentPlan]
-
-    if (!limits) {
-        return { allowed: false, reason: 'invalid subscription plan' }
-    }
+    const plan = user.currentPlan || "free"
+    const limits = PLAN_LIMITS[plan] ?? PLAN_LIMITS["free"]!
 
     const chatCount = user.chatMessagesToday || 0
     if (limits.chatMessages !== -1 && chatCount >= limits.chatMessages) {
