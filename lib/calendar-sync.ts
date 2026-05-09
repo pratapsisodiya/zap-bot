@@ -36,6 +36,14 @@ export type CalendarMeetingItem = {
     isFromCalendar: boolean;
 };
 
+export type CalendarSyncResult = {
+    connected: boolean;
+    data: CalendarMeetingItem[];
+    synced: number;
+    botsDispatched: number;
+    meetingIds: string[];
+};
+
 type SyncOptions = {
     lookAheadDays?: number;
     sourceCalendarId?: string;
@@ -92,7 +100,8 @@ function normalizeAttendees(event: GoogleCalendarEvent): string[] {
 function shouldDispatchMeeting(startTime: Date, windowMinutes: number): boolean {
     const now = Date.now();
     const dispatchBoundary = now + windowMinutes * 60 * 1000;
-    return startTime.getTime() <= dispatchBoundary;
+    const lowerBoundary = now - 15 * 60 * 1000; // Do not dispatch if meeting started more than 15 mins ago
+    return startTime.getTime() <= dispatchBoundary && startTime.getTime() >= lowerBoundary;
 }
 
 async function findExistingMeeting(userId: string, eventId: string, meetingUrl: string, startTime: Date) {
@@ -155,7 +164,7 @@ function serializeMeetingForCalendar(doc: any): CalendarMeetingItem {
 export async function syncCalendarMeetingsForUser(
     user: CalendarSyncUser,
     options: SyncOptions = {}
-) {
+): Promise<CalendarSyncResult> {
     const lookAheadDays = options.lookAheadDays ?? 7;
     const sourceCalendarId = options.sourceCalendarId ?? "primary";
     const dispatchIfDue = options.dispatchIfDue === true;

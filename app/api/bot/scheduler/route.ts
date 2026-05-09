@@ -24,11 +24,11 @@ export async function GET(request: Request) {
         }
 
         const now = new Date();
-        // Look for meetings starting in the next 10 minutes OR already started in the last 10 minutes
-        const tenMinutesFromNow = new Date(now.getTime() + 10 * 60 * 1000).toISOString();
+        // Look for meetings starting in the next 5 minutes OR already started in the last 10 minutes
+        const fiveMinutesFromNow = new Date(now.getTime() + 5 * 60 * 1000).toISOString();
         const tenMinutesAgo = new Date(now.getTime() - 10 * 60 * 1000).toISOString();
 
-        console.log(`[Scheduler] Scanning meetings between ${tenMinutesAgo} and ${tenMinutesFromNow}`);
+        console.log(`[Scheduler] Scanning meetings between ${tenMinutesAgo} and ${fiveMinutesFromNow}`);
 
         // Get meetings where:
         // 1. botScheduled is true
@@ -41,7 +41,7 @@ export async function GET(request: Request) {
                 Query.equal("botScheduled", true),
                 Query.equal("botSent", false),
                 Query.greaterThanEqual("startTime", tenMinutesAgo),
-                Query.lessThanEqual("startTime", tenMinutesFromNow),
+                Query.lessThanEqual("startTime", fiveMinutesFromNow),
                 Query.limit(20)
             ]
         );

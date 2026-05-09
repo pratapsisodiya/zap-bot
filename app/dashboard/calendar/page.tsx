@@ -89,19 +89,24 @@ export default function CalendarPage() {
   async function fetchCalendarEvents() {
     try {
       const res = await fetch("/api/calendar");
+      if (!res.ok) {
+        throw new Error(`Failed to fetch calendar: ${res.status}`);
+      }
       const data = await res.json();
       if (data.success) {
         setConnected(Boolean(data.connected));
-        setEvents((data.data || []) as MeetingEvent[]);
+        setEvents(Array.isArray(data.data) ? (data.data as MeetingEvent[]) : []);
         const oauthSuccess = searchParams.get("success");
         const oauthError = searchParams.get("error");
         if (oauthSuccess === "true") {
           setSyncMessage("Calendar connected successfully.");
         } else if (oauthError) {
           setSyncMessage(`Calendar connection issue: ${oauthError.replace(/_/g, " ")}`);
-        } else if (data.meta?.synced >= 0) {
+        } else if (typeof data.meta?.synced === "number") {
           setSyncMessage(data.connected ? `${data.meta.synced} meetings synced from calendar.` : "Connect Google Calendar to sync meetings.");
         }
+      } else if (data.error) {
+        setSyncMessage(data.error);
       }
     } catch (err) {
       console.error("Error fetching calendar:", err);
@@ -122,8 +127,8 @@ export default function CalendarPage() {
         throw new Error(json.error || "Failed to sync calendar");
       }
 
-      const synced = Number(json.data?.synced || 0);
-      const botsDispatched = Number(json.data?.botsDispatched || 0);
+      const synced = Number(json.meta?.synced || 0);
+      const botsDispatched = Number(json.meta?.botsDispatched || 0);
       setSyncMessage(`${synced} meetings synced. ${botsDispatched} bots dispatched.`);
       await fetchCalendarEvents();
     } catch (error) {

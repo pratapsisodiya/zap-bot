@@ -53,7 +53,8 @@ export async function POST() {
         return NextResponse.json({
             success: true,
             connected: result.connected,
-            data: {
+            data: result.data,
+            meta: {
                 synced: result.synced,
                 botsDispatched: result.botsDispatched,
                 meetingIds: result.meetingIds,

@@ -5,7 +5,7 @@ import { getOrCreateUser } from "@/lib/user";
 
 export const runtime = "nodejs";
 
-export async function GET() {
+export async function GET(request: Request) {
     try {
         const { userId } = await auth();
 
@@ -14,8 +14,13 @@ export async function GET() {
         }
 
         const user = await getOrCreateUser(userId);
+
+        const url = new URL(request.url);
+        const lookAheadDays = parseInt(url.searchParams.get("days") || "7", 10);
+
         const result = await syncCalendarMeetingsForUser(user as any, {
             dispatchIfDue: false,
+            lookAheadDays,
         });
 
         return NextResponse.json({

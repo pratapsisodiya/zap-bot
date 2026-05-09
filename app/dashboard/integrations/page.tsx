@@ -108,15 +108,17 @@ export default function IntegrationsPage() {
                 const data = await res.json();
 
                 const statusMap = new Map<string, IntegrationStatus>();
-                if (data.success && data.integrations) {
+                if (data && data.integrations && Array.isArray(data.integrations)) {
                     data.integrations.forEach((int: any) => {
-                        statusMap.set(int.integrationId, {
-                            id: int.integrationId,
-                            connected: int.connected,
-                            lastSynced: int.lastSynced,
-                            webhookUrl: int.webhookUrl,
-                            deliveryMode: int.deliveryMode,
-                        });
+                        if (int.integrationId) {
+                            statusMap.set(int.integrationId, {
+                                id: int.integrationId,
+                                connected: Boolean(int.connected),
+                                lastSynced: int.lastSynced,
+                                webhookUrl: int.webhookUrl,
+                                deliveryMode: int.deliveryMode,
+                            });
+                        }
                     });
                 }
 
@@ -136,6 +138,12 @@ export default function IntegrationsPage() {
                 }
             } catch (err) {
                 console.error("Failed to fetch integrations", err);
+                // Still initialize with default integrations even if fetch fails
+                const statusMap = new Map<string, IntegrationStatus>();
+                APPS.forEach(app => {
+                    statusMap.set(app.id, { id: app.id, connected: false });
+                });
+                setIntegrationStatuses(statusMap);
             } finally {
                 setIsLoading(false);
             }
