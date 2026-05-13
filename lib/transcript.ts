@@ -1,5 +1,10 @@
 export type TranscriptWord = {
     word?: string;
+    // MeetingBaas uses start/end (seconds), not startTime/endTime
+    start?: number;
+    end?: number;
+    startTime?: number;
+    endTime?: number;
 };
 
 export type TranscriptEntry = {
@@ -32,9 +37,10 @@ export function maybeParseJson<T = unknown>(value: unknown): T | unknown {
 function normalizeEntry(entry: TranscriptEntry | null | undefined): TranscriptEntry | null {
     if (!entry) return null;
 
+    // MeetingBaas sends words as [{word, start, end}]; assemble text from them if entry.text missing
     const wordsText = Array.isArray(entry.words)
         ? entry.words
-            .map((word) => (typeof word?.word === "string" ? word.word.trim() : ""))
+            .map((w) => (typeof w?.word === "string" ? w.word.trim() : ""))
             .filter(Boolean)
             .join(" ")
         : "";
@@ -45,8 +51,24 @@ function normalizeEntry(entry: TranscriptEntry | null | undefined): TranscriptEn
 
     if (!text) return null;
 
-    const startTime = typeof entry.startTime === "number" ? entry.startTime : 0;
-    const endTime = typeof entry.endTime === "number" ? entry.endTime : startTime;
+    // Derive startTime: entry field OR first word's start/startTime
+    let startTime = 0;
+    if (typeof entry.startTime === "number") {
+        startTime = entry.startTime;
+    } else if (Array.isArray(entry.words) && entry.words.length > 0) {
+        const first = entry.words[0];
+        startTime = typeof first?.start === "number" ? first.start
+            : typeof first?.startTime === "number" ? first.startTime : 0;
+    }
+
+    let endTime = startTime;
+    if (typeof entry.endTime === "number") {
+        endTime = entry.endTime;
+    } else if (Array.isArray(entry.words) && entry.words.length > 0) {
+        const last = entry.words[entry.words.length - 1];
+        endTime = typeof last?.end === "number" ? last.end
+            : typeof last?.endTime === "number" ? last.endTime : startTime;
+    }
 
     return {
         speaker: typeof entry.speaker === "string" && entry.speaker.trim() ? entry.speaker.trim() : "Speaker",

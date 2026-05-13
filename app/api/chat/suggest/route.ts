@@ -5,15 +5,11 @@ import { APPWRITE_IDS } from "@/lib/appwrite-config";
 import { extractTranscriptEntries } from "@/lib/transcript";
 import { getOrCreateUser } from "@/lib/user";
 import { canUserChat, incrementChatUsage } from "@/lib/usage";
+import { answerQuestionWithContext } from "@/lib/ai/processor";
 
-/**
- * POST /api/chat/suggest
- * Generate short in-meeting response suggestions from latest transcript context
- */
 export async function POST(request: NextRequest) {
     try {
         const { userId } = await auth();
-
         if (!userId) {
             return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
         }
@@ -26,27 +22,22 @@ export async function POST(request: NextRequest) {
             return NextResponse.json({ error: "meetingId and prompt are required" }, { status: 400 });
         }
 
-        // Fetch meeting from AppWrite
         const meetingResult = await databases.listDocuments(
             APPWRITE_IDS.databaseId,
             APPWRITE_IDS.meetingsCollectionId,
-            [
-                Query.equal("$id", meetingId),
-                Query.limit(1),
-            ],
+            [Query.equal("$id", meetingId), Query.limit(1)]
         );
 
         if (meetingResult.documents.length === 0) {
             return NextResponse.json({ error: "Meeting not found" }, { status: 404 });
         }
 
-        const meeting = meetingResult.documents[0];
+        const meeting = meetingResult.documents[0] as any;
 
         if (meeting.userId !== user.$id) {
             return NextResponse.json({ error: "Forbidden" }, { status: 403 });
         }
 
-        // Check usage limits
         const canChatResult = await canUserChat(userId);
         if (!canChatResult.allowed) {
             return NextResponse.json({ error: canChatResult.reason }, { status: 403 });
@@ -54,17 +45,16 @@ export async function POST(request: NextRequest) {
 
         await incrementChatUsage(userId);
 
-        // Get recent transcript entries
-        const transcript = meeting.transcript;
-        let recentSnippet = "";
-
-        recentSnippet = extractTranscriptEntries(transcript)
-            .slice(-8)
-            .map((entry) => `${entry.speaker || "Speaker"}: ${entry.text || ""}`)
+        const recentContext = extractTranscriptEntries(meeting.transcript)
+            .slice(-10)
+            .map((e) => `${e.speaker || "Speaker"}: ${e.text || ""}`)
             .join("\n");
 
-        // Build fallback suggestion
-        const suggestion = buildLocalSuggestionFallback(prompt, [recentSnippet]);
+        const suggestion = await answerQuestionWithContext({
+            question: `Suggest a concise, professional response I can say during this meeting for the following situation: "${prompt}". Give me 2-3 sentence talking points I can use directly.`,
+            context: recentContext || meeting.summary || "No transcript available.",
+            meetingTitle: meeting.title,
+        });
 
         return NextResponse.json({ success: true, suggestion });
     } catch (error) {
@@ -74,15 +64,4 @@ export async function POST(request: NextRequest) {
             { status: 500 }
         );
     }
-}
-
-function buildLocalSuggestionFallback(query: string, snippets: string[]): string {
-    const context = snippets.slice(0, 2).join(" ").slice(0, 180);
-    return [
-        "Suggested response:",
-        `"Based on what we discussed, ${context || "we should align on scope, owner, and next step"}."`,
-        "",
-        "Follow-up to ask:",
-        `"Should we lock owner + deadline for ${query}?"`,
-    ].join("\n");
 }

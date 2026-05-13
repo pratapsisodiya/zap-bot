@@ -374,12 +374,14 @@ export async function POST(request: NextRequest) {
             const hasTranscript = Boolean(normalizedTranscript.text.trim());
             const providerRecordingUrl = webhookData.mp4 || webhookData.recording_url || null;
 
-            let storedRecordingKey: string | null = null;
+            // Try to upload to object storage; fall back to the raw provider URL so it is never lost.
+            let storedRecordingKey: string | null = providerRecordingUrl;
             if (providerRecordingUrl) {
                 try {
                     storedRecordingKey = await uploadRecordingFromUrl(meeting.$id, providerRecordingUrl);
                 } catch (recordingUploadError) {
-                    console.warn("Recording upload skipped:", recordingUploadError);
+                    console.warn("Recording upload skipped, storing raw provider URL:", recordingUploadError);
+                    // storedRecordingKey already set to providerRecordingUrl above
                 }
             }
 
@@ -399,7 +401,7 @@ export async function POST(request: NextRequest) {
                 {
                     meetingEnded: true,
                     transcriptReady: hasTranscript,
-                    recordingUrl: storedRecordingKey || providerRecordingUrl,
+                    recordingUrl: storedRecordingKey,
                     transcriptStorageKey,
                     meetingCompletedAt: completionTime,
                     processingStatus: hasTranscript ? "processing" : "completed_no_transcript",

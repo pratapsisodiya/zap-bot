@@ -34,7 +34,7 @@ export async function POST(request: NextRequest) {
 
         const user = await getOrCreateUser(userId);
         const body = await request.json();
-        const { meetingId, query } = body;
+        const { meetingId, query, history } = body;
 
         if (!meetingId || !query) {
             return NextResponse.json({ error: "meetingId and query are required" }, { status: 400 });
@@ -75,18 +75,20 @@ export async function POST(request: NextRequest) {
                 const answer = await answerMeetingQuestion({
                     question: query,
                     context: ragResult.context,
-                    meetingTitle: meeting.title
+                    meetingTitle: meeting.title,
+                    history,
                 });
                 return NextResponse.json({ success: true, answer, backend: "rag" });
             }
 
             // Fallback to transcript
             const transcriptText = transcriptToText(meeting.transcript);
-            
+
             const answer = await answerMeetingQuestion({
                 question: query,
-                context: transcriptText || "No transcript available",
-                meetingTitle: meeting.title
+                context: transcriptText || meeting.summary || "No transcript available",
+                meetingTitle: meeting.title,
+                history,
             });
             return NextResponse.json({ success: true, answer, backend: "transcript-fallback" });
         } catch (error) {

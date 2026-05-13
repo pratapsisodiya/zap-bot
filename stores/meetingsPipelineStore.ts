@@ -12,6 +12,10 @@ export type MeetingItem = {
   transcriptReady?: boolean;
   botScheduled?: boolean;
   botSent?: boolean;
+  botStatus?: string;
+  processingStatus?: string;
+  summary?: string | null;
+  userNotes?: string | null;
 };
 
 type MeetingsTab = "upcoming" | "past";

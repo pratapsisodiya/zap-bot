@@ -10,6 +10,45 @@ import {
     resolveRecordingUrl,
 } from "@/lib/aws";
 import { extractTranscriptEntries, maybeParseJson } from "@/lib/transcript";
+import { getBotTranscript } from "@/lib/meeting-baas";
+import { S3Client, GetObjectCommand } from "@aws-sdk/client-s3";
+
+const _s3 = new S3Client({
+    region: process.env.AWS_REGION || "us-east-1",
+    endpoint: process.env.R2_ENDPOINT || process.env.AWS_S3_ENDPOINT,
+    forcePathStyle: Boolean(process.env.R2_ENDPOINT || process.env.AWS_S3_ENDPOINT),
+    credentials: {
+        accessKeyId: process.env.R2_ACCESS_KEY_ID || process.env.AWS_ACCESS_KEY_ID || "",
+        secretAccessKey: process.env.R2_SECRET_ACCESS_KEY || process.env.AWS_SECRET_ACCESS_KEY || "",
+    },
+});
+
+async function fetchTranscriptFromStorage(key: string): Promise<string | null> {
+    try {
+        if (key.startsWith("appwrite:")) {
+            // Appwrite storage file — fetch via public view URL
+            const bucketId = process.env.APPWRITE_STORAGE_BUCKET_ID || "";
+            const endpoint = (process.env.NEXT_PUBLIC_APPWRITE_ENDPOINT || "https://cloud.appwrite.io/v1").replace(/\/$/, "");
+            const projectId = process.env.NEXT_PUBLIC_APPWRITE_PROJECT_ID || "";
+            const fileId = key.replace("appwrite:", "");
+            if (!bucketId || !projectId) return null;
+            const url = `${endpoint}/storage/buckets/${bucketId}/files/${fileId}/view?project=${projectId}`;
+            const res = await fetch(url);
+            if (!res.ok) return null;
+            return await res.text();
+        }
+        // S3 / R2 key
+        const bucket = process.env.OBJECT_STORAGE_BUCKET || process.env.AWS_S3_BUCKET || process.env.R2_BUCKET || "zap-bot-meetings";
+        const cmd = new GetObjectCommand({ Bucket: bucket, Key: key });
+        const obj = await _s3.send(cmd);
+        const chunks: Buffer[] = [];
+        const stream = obj.Body as AsyncIterable<Uint8Array>;
+        for await (const chunk of stream) chunks.push(Buffer.from(chunk));
+        return Buffer.concat(chunks).toString("utf-8");
+    } catch {
+        return null;
+    }
+}
 
 type MeetingHighlight = {
     type: string;
@@ -130,8 +169,35 @@ function normalizeBotStatus(meeting: any): string {
     return "pending";
 }
 
+async function resolveTranscript(meeting: any): Promise<unknown> {
+    // 1. Try the inlined Appwrite field first (fast path)
+    const stored = meeting.transcript;
+    const storedEntries = extractTranscriptEntries(stored);
+    if (storedEntries.length > 0) return stored;
+
+    // 2. Full transcript stored in object storage (S3/R2/Appwrite storage)
+    if (meeting.transcriptStorageKey) {
+        const raw = await fetchTranscriptFromStorage(meeting.transcriptStorageKey);
+        if (raw) {
+            const entries = extractTranscriptEntries(raw);
+            if (entries.length > 0) return raw;
+        }
+    }
+
+    // 3. Re-fetch directly from MeetingBaas API using the bot ID
+    if (meeting.botId) {
+        try {
+            const live = await getBotTranscript(meeting.botId);
+            if (live) return live;
+        } catch {}
+    }
+
+    return null;
+}
+
 async function serializeMeeting(meeting: any) {
-    const transcriptEntries = extractTranscriptEntries(meeting.transcript);
+    const transcriptSource = await resolveTranscript(meeting);
+    const transcriptEntries = extractTranscriptEntries(transcriptSource);
     const recordingUrl = await resolveRecordingUrl(meeting.recordingUrl);
     const duration = meeting.endTime && meeting.startTime
         ? Math.max(0, Math.floor((new Date(meeting.endTime).getTime() - new Date(meeting.startTime).getTime()) / 1000))

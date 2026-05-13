@@ -1,22 +1,40 @@
 {
-    "name": "Zap-Bot",
+    "name": "ZapBot — Meeting AI Assistant",
     "short_name": "ZapBot",
-    "description": "AI-Powered Meeting Assistant",
+    "description": "AI-powered meeting assistant that joins, records, transcribes and summarises your meetings.",
     "start_url": "/dashboard",
+    "scope": "/",
     "display": "standalone",
-    "background_color": "#0a0a0b",
-    "theme_color": "#0a0a0b",
+    "orientation": "portrait-primary",
+    "background_color": "#f7f8fb",
+    "theme_color": "#1f2937",
+    "categories": ["productivity", "business"],
     "icons": [
         {
-            "src": "/favicon.ico",
-            "sizes": "64x64",
-            "type": "image/x-icon"
+            "src": "/icon-192.png",
+            "sizes": "192x192",
+            "type": "image/png",
+            "purpose": "any"
         },
         {
-            "src": "https://img.icons8.com/flat-round/512/lightning-bolt.png",
+            "src": "/icon-512.png",
             "sizes": "512x512",
             "type": "image/png",
             "purpose": "any maskable"
+        }
+    ],
+    "shortcuts": [
+        {
+            "name": "Meeting History",
+            "short_name": "Meetings",
+            "url": "/dashboard/meetings",
+            "icons": [{ "src": "/icon-192.png", "sizes": "192x192" }]
+        },
+        {
+            "name": "AI Chat",
+            "short_name": "Chat",
+            "url": "/dashboard/chat",
+            "icons": [{ "src": "/icon-192.png", "sizes": "192x192" }]
         }
     ]
 }

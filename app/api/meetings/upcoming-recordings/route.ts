@@ -73,6 +73,14 @@ export async function GET(request: Request) {
         // Take first 10
         upcomingRecordings = upcomingRecordings.slice(0, 10);
 
+        function resolveStatus(m: any): string {
+            const s = String(m.botStatus || "").toLowerCase().trim();
+            if (["pending","joining","in_meeting","recording","processing","completed","failed"].includes(s)) return s;
+            if (m.botSent) return "joining";
+            if (m.botScheduled) return "pending";
+            return "pending";
+        }
+
         // Transform data to include platform detection
         const transformedRecordings = upcomingRecordings.map((meeting: any) => ({
             $id: meeting.$id,
@@ -90,6 +98,7 @@ export async function GET(request: Request) {
             isFromCalendar: meeting.isFromCalendar,
             platform: detectPlatformFromUrl(meeting.meetingUrl || undefined),
             joinedConfirmed: Boolean(meeting.botJoinedAt),
+            botStatus: resolveStatus(meeting),
             objectStorageProvider: getObjectStorageProvider(),
             recordingStoredInR2: isRecordingStoredInR2(meeting.recordingUrl),
             participants: Array.isArray(meeting.attendees)

@@ -1,9 +1,9 @@
-import type { Metadata } from "next";
+import type { Metadata, Viewport } from "next";
 import { ClerkProvider } from "@clerk/nextjs";
 import { Inter, Space_Grotesk } from "next/font/google";
 import "./globals.css";
+import PWARegister from "@/components/PWARegister";
 
-// [2] Configure fonts
 const inter = Inter({
   subsets: ["latin"],
   variable: "--font-inter",
@@ -16,14 +16,31 @@ const space = Space_Grotesk({
   display: 'swap',
 });
 
+export const viewport: Viewport = {
+  themeColor: "#1f2937",
+  width: "device-width",
+  initialScale: 1,
+  maximumScale: 1,
+};
+
 export const metadata: Metadata = {
-  title: "Zap Bot — Meeting AI Assistant",
+  title: "ZapBot — Meeting AI Assistant",
   description:
     "AI-powered meeting assistant that joins your meetings, records, transcribes, and summarizes everything automatically.",
   keywords: ["meeting", "AI", "assistant", "transcription", "recording", "calendar"],
+  manifest: "/manifest.json",
+  appleWebApp: {
+    capable: true,
+    statusBarStyle: "default",
+    title: "ZapBot",
+  },
   icons: {
-    icon: "/icon.svg",
-    shortcut: "/icon.svg",
+    icon: [
+      { url: "/icon-192.png", sizes: "192x192", type: "image/png" },
+      { url: "/icon-512.png", sizes: "512x512", type: "image/png" },
+    ],
+    apple: "/icon-192.png",
+    shortcut: "/icon-192.png",
   },
 };
 
@@ -50,6 +67,7 @@ export default function RootLayout({
           />
         </head>
         <body className="bg-background text-foreground antialiased selection:bg-blue-500/30 font-sans transition-colors duration-500">
+          <PWARegister />
           <ClerkProvider afterSignOutUrl="/">
             <main className="min-h-screen">
               {children}

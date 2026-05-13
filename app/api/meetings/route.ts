@@ -25,12 +25,26 @@ function normalizeParticipants(attendees: unknown): string[] {
         .filter((v: string) => Boolean(v));
 }
 
+function normalizeBotStatus(m: any): string {
+    const s = String(m.botStatus || m.processingStatus || "").toLowerCase().trim();
+    if (["pending","joining","in_meeting","recording","processing","completed","failed"].includes(s)) return s;
+    if (m.processingError) return "failed";
+    if (m.processed && m.transcriptReady) return "completed";
+    if (m.transcriptReady || m.meetingEnded || m.recordingUrl) return "processing";
+    if (m.botJoinedAt) return "in_meeting";
+    if (m.botSent) return "joining";
+    if (m.botScheduled) return "pending";
+    return "pending";
+}
+
 async function serializeMeeting(meeting: any) {
     return {
         ...meeting,
+        id: meeting.$id,
         joinedConfirmed: Boolean(meeting.botJoinedAt),
         platform: detectPlatformFromUrl(meeting.meetingUrl),
         participants: normalizeParticipants(meeting.attendees),
+        botStatus: normalizeBotStatus(meeting),
         objectStorageProvider: getObjectStorageProvider(),
         recordingStoredInR2: isRecordingStoredInR2(meeting.recordingUrl),
         recordingStorageKey: meeting.recordingUrl,

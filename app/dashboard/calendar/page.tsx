@@ -1,25 +1,24 @@
 "use client";
 
-import { Suspense, useEffect, useMemo, useState } from "react";
-import Calendar from "react-calendar";
+import { Suspense, useCallback, useEffect, useMemo, useState } from "react";
+import { useSearchParams } from "next/navigation";
 import {
-  Calendar as CalendarIcon,
-  CheckCircle2,
-  Clock,
-  Link as LinkIcon,
-  Loader2,
-  Users,
-  Video,
-  Bot,
+  ChevronLeft,
   ChevronRight,
   Plus,
-  ArrowRight,
-  Info,
-  Globe
+  RefreshCw,
+  Loader2,
+  Bot,
+  Video,
+  Users,
+  Clock,
+  CheckCircle2,
+  AlertCircle,
+  LinkIcon,
+  CalendarDays,
 } from "lucide-react";
-import { useSearchParams } from "next/navigation";
-import { motion, AnimatePresence, Variants } from "framer-motion";
 import { cn } from "@/lib/utils";
+import MeetingDialog from "@/components/MeetingDialog";
 
 type MeetingEvent = {
   id: string;
@@ -28,470 +27,485 @@ type MeetingEvent = {
   end: string;
   meetingUrl?: string;
   attendees: string[];
-  organizer?: string;
   platform?: string;
   botScheduled?: boolean;
   botSent?: boolean;
   joinedConfirmed?: boolean;
-  calendarSyncAt?: string | null;
 };
 
-const toDateKey = (d: Date) => {
-  const y = d.getFullYear();
-  const m = String(d.getMonth() + 1).padStart(2, "0");
-  const day = String(d.getDate()).padStart(2, "0");
-  return `${y}-${m}-${day}`;
+const MONTHS = [
+  "January","February","March","April","May","June",
+  "July","August","September","October","November","December",
+];
+const DOW_SHORT = ["Sun","Mon","Tue","Wed","Thu","Fri","Sat"];
+
+function toKey(d: Date) {
+  return `${d.getFullYear()}-${d.getMonth()}-${d.getDate()}`;
+}
+
+function formatTime(iso: string) {
+  return new Date(iso).toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit", hour12: true });
+}
+
+function isSameDay(a: Date, b: Date) {
+  return a.getFullYear() === b.getFullYear() &&
+    a.getMonth() === b.getMonth() &&
+    a.getDate() === b.getDate();
+}
+
+const STATUS_DOT: Record<string, string> = {
+  live:      "bg-violet-500",
+  upcoming:  "bg-blue-400",
+  completed: "bg-emerald-500",
 };
 
-const formatDateTime = (isoString: string) => {
-  return new Date(isoString).toLocaleTimeString("en-US", {
-    hour: "numeric",
-    minute: "2-digit",
-    hour12: true,
-  });
-};
-
-const getMeetingStatus = (start: string, end: string) => {
-  const now = new Date();
-  const startTime = new Date(start);
-  const endTime = new Date(end);
-  if (now >= startTime && now <= endTime) return "now";
-  if (now < startTime) return "upcoming";
+function getStatus(start: string, end: string): "live" | "upcoming" | "completed" {
+  const now = Date.now();
+  const s = new Date(start).getTime();
+  const e = new Date(end).getTime();
+  if (now >= s && now <= e) return "live";
+  if (now < s) return "upcoming";
   return "completed";
+}
+
+const STATUS_BADGE: Record<string, { label: string; cls: string }> = {
+  live:      { label: "Live",      cls: "bg-violet-50 text-violet-700 border-violet-200" },
+  upcoming:  { label: "Upcoming",  cls: "bg-blue-50 text-blue-700 border-blue-200" },
+  completed: { label: "Completed", cls: "bg-emerald-50 text-emerald-700 border-emerald-200" },
 };
 
-// --- ANIMATION VARIANTS ---
-const stagger: Variants = {
-  hidden: { opacity: 0 },
-  visible: { opacity: 1, transition: { staggerChildren: 0.1 } },
-};
+// ─── Calendar grid ────────────────────────────────────────────────────────────
+function buildGrid(year: number, month: number): (Date | null)[] {
+  const first = new Date(year, month, 1);
+  const last  = new Date(year, month + 1, 0);
+  const pad   = first.getDay();
+  const total = Math.ceil((pad + last.getDate()) / 7) * 7;
+  return Array.from({ length: total }, (_, i) => {
+    const offset = i - pad;
+    return offset < 0 || offset >= last.getDate() ? null : new Date(year, month, offset + 1);
+  });
+}
 
-const fadeUpItem: Variants = {
-  hidden: { opacity: 0, y: 15 },
-  visible: { opacity: 1, y: 0, transition: { duration: 0.5, ease: [0.16, 1, 0.3, 1] } }
-};
-
+// ─── Inner page ───────────────────────────────────────────────────────────────
 function CalendarPageInner() {
   const searchParams = useSearchParams();
+  const today = useMemo(() => new Date(), []);
+
+  const [year, setYear]           = useState(today.getFullYear());
+  const [month, setMonth]         = useState(today.getMonth());
+  const [selected, setSelected]   = useState<Date>(today);
+  const [events, setEvents]       = useState<MeetingEvent[]>([]);
   const [connected, setConnected] = useState(false);
-  const [loading, setLoading] = useState(true);
-  const [syncing, setSyncing] = useState(false);
-  const [events, setEvents] = useState<MeetingEvent[]>([]);
-  const [selectedDate, setSelectedDate] = useState<Date>(new Date());
-  const [sendingBotId, setSendingBotId] = useState<string | null>(null);
-  const [botMessages, setBotMessages] = useState<Record<string, string>>({});
-  const [syncMessage, setSyncMessage] = useState<string | null>(null);
+  const [loading, setLoading]     = useState(true);
+  const [syncing, setSyncing]     = useState(false);
+  const [notice, setNotice]       = useState<{ msg: string; ok: boolean } | null>(null);
+  const [busyBot, setBusyBot]     = useState<string | null>(null);
+  const [dialogOpen, setDialogOpen] = useState(false);
 
-  useEffect(() => {
-    void fetchCalendarEvents();
-  }, [searchParams]);
-
-  async function fetchCalendarEvents() {
+  const fetchEvents = useCallback(async () => {
     try {
       const res = await fetch("/api/calendar");
-      if (!res.ok) {
-        throw new Error(`Failed to fetch calendar: ${res.status}`);
-      }
+      if (!res.ok) throw new Error("Failed");
       const data = await res.json();
       if (data.success) {
         setConnected(Boolean(data.connected));
-        setEvents(Array.isArray(data.data) ? (data.data as MeetingEvent[]) : []);
-        const oauthSuccess = searchParams.get("success");
-        const oauthError = searchParams.get("error");
-        if (oauthSuccess === "true") {
-          setSyncMessage("Calendar connected successfully.");
-        } else if (oauthError) {
-          setSyncMessage(`Calendar connection issue: ${oauthError.replace(/_/g, " ")}`);
-        } else if (typeof data.meta?.synced === "number") {
-          setSyncMessage(data.connected ? `${data.meta.synced} meetings synced from calendar.` : "Connect Google Calendar to sync meetings.");
-        }
-      } else if (data.error) {
-        setSyncMessage(data.error);
+        setEvents(Array.isArray(data.data) ? data.data : []);
+        const ok  = searchParams.get("success");
+        const err = searchParams.get("error");
+        if (ok === "true")  setNotice({ msg: "Calendar connected.", ok: true });
+        else if (err)       setNotice({ msg: `Connection issue: ${err.replace(/_/g, " ")}`, ok: false });
       }
-    } catch (err) {
-      console.error("Error fetching calendar:", err);
-      setSyncMessage("Failed to load your calendar.");
-    } finally {
-      setLoading(false);
-    }
-  }
+    } catch { setNotice({ msg: "Failed to load calendar.", ok: false }); }
+    finally { setLoading(false); }
+  }, [searchParams]);
 
-  async function syncCalendarNow() {
+  useEffect(() => { void fetchEvents(); }, [fetchEvents]);
+
+  async function syncNow() {
     setSyncing(true);
-    setSyncMessage(null);
-
+    setNotice(null);
     try {
-      const res = await fetch("/api/calendar", { method: "POST" });
+      const res  = await fetch("/api/calendar", { method: "POST" });
       const json = await res.json();
-      if (!res.ok || !json.success) {
-        throw new Error(json.error || "Failed to sync calendar");
-      }
-
-      const synced = Number(json.meta?.synced || 0);
-      const botsDispatched = Number(json.meta?.botsDispatched || 0);
-      setSyncMessage(`${synced} meetings synced. ${botsDispatched} bots dispatched.`);
-      await fetchCalendarEvents();
-    } catch (error) {
-      setSyncMessage(error instanceof Error ? error.message : "Failed to sync calendar");
-    } finally {
-      setSyncing(false);
-    }
+      if (!res.ok || !json.success) throw new Error(json.error || "Sync failed");
+      setNotice({ msg: `${json.meta?.synced ?? 0} meetings synced.`, ok: true });
+      await fetchEvents();
+    } catch (e) {
+      setNotice({ msg: e instanceof Error ? e.message : "Sync failed", ok: false });
+    } finally { setSyncing(false); }
   }
 
-  const eventsByDay = useMemo(() => {
+  async function sendBot(evt: MeetingEvent) {
+    if (!evt.meetingUrl || busyBot) return;
+    setBusyBot(evt.id);
+    try {
+      const res  = await fetch(`/api/meetings/${evt.id}/bot-toggle`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ botScheduled: true, forceDispatch: true }),
+      });
+      const json = await res.json();
+      if (!res.ok || !json?.success) throw new Error(json?.error || "Failed");
+      setNotice({ msg: "Bot dispatched.", ok: true });
+      await fetchEvents();
+    } catch (e) {
+      setNotice({ msg: e instanceof Error ? e.message : "Failed to send bot", ok: false });
+    } finally { setBusyBot(null); }
+  }
+
+  // Navigation
+  function prevMonth() {
+    if (month === 0) { setYear(y => y - 1); setMonth(11); }
+    else setMonth(m => m - 1);
+  }
+  function nextMonth() {
+    if (month === 11) { setYear(y => y + 1); setMonth(0); }
+    else setMonth(m => m + 1);
+  }
+
+  const grid = useMemo(() => buildGrid(year, month), [year, month]);
+
+  const byDay = useMemo(() => {
     const map = new Map<string, MeetingEvent[]>();
-    for (const evt of events) {
-      const key = toDateKey(new Date(evt.start));
-      const list = map.get(key) || [];
-      list.push(evt);
-      map.set(key, list);
+    for (const e of events) {
+      const k = toKey(new Date(e.start));
+      map.set(k, [...(map.get(k) ?? []), e]);
     }
     return map;
   }, [events]);
 
-  const selectedDayEvents = useMemo(() => {
-    return (eventsByDay.get(toDateKey(selectedDate)) || []).sort(
-      (a, b) => new Date(a.start).getTime() - new Date(b.start).getTime()
-    );
-  }, [eventsByDay, selectedDate]);
-
-  async function dispatchBotForEvent(evt: MeetingEvent) {
-    if (!evt.meetingUrl || sendingBotId) return;
-
-    setSendingBotId(evt.id);
-    setBotMessages((prev) => ({ ...prev, [evt.id]: "Dispatching bot..." }));
-
-    try {
-      const res = await fetch(`/api/meetings/${evt.id}/bot-toggle`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          botScheduled: true,
-          forceDispatch: true,
-        }),
-      });
-
-      const json = await res.json();
-      if (!res.ok || !json?.success) {
-        throw new Error(json?.warning || json?.error || "Failed to dispatch bot");
-      }
-
-      setBotMessages((prev) => ({ ...prev, [evt.id]: "Bot dispatched successfully." }));
-      await fetchCalendarEvents();
-    } catch (error) {
-      const message = error instanceof Error ? error.message : "Failed to dispatch bot";
-      setBotMessages((prev) => ({ ...prev, [evt.id]: message }));
-    } finally {
-      setSendingBotId(null);
-    }
-  }
+  const dayEvents = useMemo(() =>
+    (byDay.get(toKey(selected)) ?? []).sort((a, b) =>
+      new Date(a.start).getTime() - new Date(b.start).getTime()
+    ), [byDay, selected]);
 
   return (
-    <div className="flex h-screen overflow-hidden bg-slate-50 text-slate-900 font-sans selection:bg-blue-200 relative">
-      {/* SaaS Premium Background Gradient */}
-      <div className="absolute top-0 inset-x-0 h-[800px] bg-[radial-gradient(ellipse_at_top,_var(--tw-gradient-stops))] from-blue-100/50 via-white to-slate-50 -z-10 pointer-events-none" />
+    <div className="flex h-[calc(100vh-64px)] md:h-[calc(100vh-80px)] flex-col overflow-hidden bg-[#f8f9fb]">
 
-      {/* SIDEBAR: Navigation & Mini Calendar */}
-      <aside className="w-80 flex flex-col border-r border-slate-200/80 bg-white/60 backdrop-blur-xl z-20 shadow-[4px_0_24px_rgba(0,0,0,0.02)]">
-        <div className="p-6 border-b border-slate-200/80">
-          <div className="flex items-center justify-between mb-6">
-            <h2 className="text-sm font-bold text-slate-900 tracking-tight flex items-center gap-2">
-              <CalendarIcon className="w-4 h-4 text-blue-600" />
-              Schedule
-            </h2>
-            {!connected && (
-              <button onClick={() => window.location.href = "/api/calendar/connect"} className="p-1.5 rounded-lg border border-slate-200 bg-white hover:border-blue-200 hover:text-blue-600 hover:bg-blue-50 transition-all shadow-sm text-slate-500">
-                <Plus size={16} />
+      {/* ── Top bar ─────────────────────────────────────────────── */}
+      <div className="flex flex-col gap-2 border-b border-slate-100 bg-white px-5 py-4 sm:flex-row sm:items-center sm:justify-between">
+        <div className="flex items-center gap-3">
+          <button onClick={prevMonth} className="flex h-8 w-8 items-center justify-center rounded-lg border border-slate-200 text-slate-500 hover:bg-slate-50 transition">
+            <ChevronLeft size={14} />
+          </button>
+          <span className="w-44 text-center text-base font-semibold text-slate-800">
+            {MONTHS[month]} {year}
+          </span>
+          <button onClick={nextMonth} className="flex h-8 w-8 items-center justify-center rounded-lg border border-slate-200 text-slate-500 hover:bg-slate-50 transition">
+            <ChevronRight size={14} />
+          </button>
+          <button
+            onClick={() => { setYear(today.getFullYear()); setMonth(today.getMonth()); setSelected(today); }}
+            className="rounded-lg border border-slate-200 bg-white px-3 py-1.5 text-xs font-medium text-slate-600 hover:bg-slate-50 transition"
+          >
+            Today
+          </button>
+        </div>
+
+        <div className="flex items-center gap-2">
+          {connected && (
+            <>
+              <div className="hidden sm:flex items-center gap-1.5 rounded-full border border-emerald-200 bg-emerald-50 px-2.5 py-1">
+                <div className="h-1.5 w-1.5 rounded-full bg-emerald-500 animate-pulse" />
+                <span className="text-[11px] font-semibold text-emerald-700">Live Sync</span>
+              </div>
+              <button
+                onClick={() => void syncNow()}
+                disabled={syncing}
+                className="flex items-center gap-1.5 rounded-lg border border-slate-200 bg-white px-3 py-2 text-xs font-medium text-slate-600 hover:bg-slate-50 transition disabled:opacity-50"
+              >
+                <RefreshCw size={12} className={syncing ? "animate-spin" : ""} />
+                Sync
               </button>
-            )}
-          </div>
-
-          <div className="calendar-modern-wrap">
-            <Calendar
-              onChange={(value: unknown) => {
-                const next = Array.isArray(value) ? value[0] : value;
-                if (next instanceof Date) setSelectedDate(next);
-              }}
-              value={selectedDate}
-              tileContent={({ date, view }: { date: Date; view: string }) => {
-                if (view !== "month") return null;
-                const hasEvents = eventsByDay.has(toDateKey(date));
-                return hasEvents ? (
-                  <div className="mt-1 flex justify-center absolute bottom-1 inset-x-0">
-                    <div className="h-1 w-1 rounded-full bg-blue-500" />
-                  </div>
-                ) : null;
-              }}
-            />
-          </div>
+            </>
+          )}
+          {!connected && (
+            <button
+              onClick={() => { window.location.href = "/api/calendar/connect"; }}
+              className="flex items-center gap-1.5 rounded-lg border border-blue-200 bg-blue-50 px-3 py-2 text-xs font-semibold text-blue-700 hover:bg-blue-100 transition"
+            >
+              <LinkIcon size={12} /> Connect Google Calendar
+            </button>
+          )}
+          <button
+            onClick={() => setDialogOpen(true)}
+            className="flex items-center gap-1.5 rounded-lg bg-slate-900 px-3 py-2 text-xs font-semibold text-white hover:bg-slate-800 transition"
+          >
+            <Plus size={13} /> Schedule
+          </button>
         </div>
+      </div>
 
-        <div className="flex-1 p-6 space-y-4">
-          <div className="rounded-2xl border border-slate-200/80 bg-white shadow-sm p-5 relative overflow-hidden group">
-            {/* Decorative background accent */}
-            <div className="absolute top-0 right-0 w-24 h-24 bg-gradient-to-bl from-blue-50 to-transparent rounded-bl-full opacity-50 pointer-events-none" />
-            
-            <div className="flex items-center gap-2 text-[12px] font-bold text-slate-900 mb-2 uppercase tracking-wide">
-              <Globe className="w-4 h-4 text-blue-500" />
-              Workspace Link
+      {/* ── Notice bar ──────────────────────────────────────────── */}
+      {notice && (
+        <div className={cn(
+          "flex items-center justify-between gap-3 px-5 py-2.5 text-xs font-medium",
+          notice.ok ? "bg-emerald-50 text-emerald-700" : "bg-red-50 text-red-600"
+        )}>
+          <span className="flex items-center gap-1.5">
+            {notice.ok ? <CheckCircle2 size={13} /> : <AlertCircle size={13} />}
+            {notice.msg}
+          </span>
+          <button onClick={() => setNotice(null)} className="text-xs opacity-60 hover:opacity-100">×</button>
+        </div>
+      )}
+
+      {/* ── Body ────────────────────────────────────────────────── */}
+      <div className="flex flex-1 overflow-hidden">
+
+        {/* Calendar grid */}
+        <div className="flex flex-1 flex-col overflow-hidden">
+          {/* Day-of-week headers */}
+          <div className="grid grid-cols-7 border-b border-slate-100 bg-white">
+            {DOW_SHORT.map(d => (
+              <div key={d} className="py-2 text-center text-[11px] font-semibold uppercase tracking-wide text-slate-400">
+                {d}
+              </div>
+            ))}
+          </div>
+
+          {/* Cells */}
+          {loading ? (
+            <div className="flex flex-1 items-center justify-center gap-2 text-slate-400">
+              <Loader2 size={20} className="animate-spin text-blue-500" />
+              <span className="text-sm">Loading...</span>
             </div>
-            <p className="text-[13px] font-medium text-slate-500 leading-relaxed">
-              {connected ? "Your calendar is actively syncing with ZapBot in real-time." : "Connect your calendar to let ZapBot automatically join meetings."}
+          ) : (
+            <div className="flex-1 overflow-y-auto">
+              <div className="grid grid-cols-7 divide-x divide-slate-100">
+                {grid.map((day, i) => {
+                  if (!day) return (
+                    <div key={i} className="min-h-[88px] border-b border-slate-100 bg-slate-50/40" />
+                  );
+                  const evts       = byDay.get(toKey(day)) ?? [];
+                  const isToday    = isSameDay(day, today);
+                  const isSel      = isSameDay(day, selected);
+                  const otherMonth = day.getMonth() !== month;
+
+                  return (
+                    <div
+                      key={i}
+                      onClick={() => setSelected(day)}
+                      className={cn(
+                        "min-h-[88px] cursor-pointer border-b border-slate-100 p-2 transition-colors",
+                        isSel   ? "bg-blue-50"  : "hover:bg-slate-50",
+                        otherMonth && "opacity-30"
+                      )}
+                    >
+                      <div className="mb-1.5 flex items-center justify-between">
+                        <span className={cn(
+                          "flex h-6 w-6 items-center justify-center rounded-full text-xs font-semibold",
+                          isToday
+                            ? "bg-slate-900 text-white"
+                            : isSel
+                              ? "bg-blue-600 text-white"
+                              : "text-slate-600"
+                        )}>
+                          {day.getDate()}
+                        </span>
+                        {evts.length > 0 && (
+                          <span className="rounded-full bg-blue-100 px-1.5 py-0.5 text-[9px] font-bold text-blue-700">
+                            {evts.length}
+                          </span>
+                        )}
+                      </div>
+
+                      <div className="space-y-0.5">
+                        {evts.slice(0, 2).map(e => {
+                          const st = getStatus(e.start, e.end);
+                          return (
+                            <div
+                              key={e.id}
+                              className="flex items-center gap-1 rounded-md bg-white border border-slate-200 px-1.5 py-0.5 shadow-sm"
+                              onClick={ev => { ev.stopPropagation(); setSelected(day); }}
+                            >
+                              <div className={cn("h-1.5 w-1.5 flex-shrink-0 rounded-full", STATUS_DOT[st])} />
+                              <span className="truncate text-[10px] font-medium text-slate-700">
+                                {e.title || "Meeting"}
+                              </span>
+                            </div>
+                          );
+                        })}
+                        {evts.length > 2 && (
+                          <p className="pl-0.5 text-[10px] text-slate-400">+{evts.length - 2} more</p>
+                        )}
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+          )}
+        </div>
+
+        {/* ── Day detail panel ────────────────────────────────── */}
+        <div className="hidden w-80 flex-shrink-0 flex-col overflow-hidden border-l border-slate-100 bg-white md:flex">
+          {/* Panel header */}
+          <div className="border-b border-slate-100 px-4 py-3">
+            <p className="text-[11px] font-semibold uppercase tracking-wide text-slate-400">
+              {selected.toLocaleDateString("en-US", { weekday: "long" })}
             </p>
-            {syncMessage && (
-              <p className="mt-4 rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 text-xs font-medium text-slate-600">
-                {syncMessage}
-              </p>
+            <p className="text-lg font-bold text-slate-900">
+              {selected.getDate()} {MONTHS[selected.getMonth()]}
+              {selected.getFullYear() !== today.getFullYear() && ` ${selected.getFullYear()}`}
+            </p>
+          </div>
+
+          {/* Event list */}
+          <div className="flex-1 overflow-y-auto p-3 space-y-2">
+            {loading ? (
+              <div className="flex items-center justify-center py-12">
+                <Loader2 size={18} className="animate-spin text-blue-500" />
+              </div>
+            ) : dayEvents.length === 0 ? (
+              <div className="flex flex-col items-center justify-center py-14 gap-3 text-center">
+                <CalendarDays size={28} strokeWidth={1.5} className="text-slate-300" />
+                <p className="text-sm font-medium text-slate-500">No meetings</p>
+                <p className="text-xs text-slate-400">Tap + Schedule to add one</p>
+                <button
+                  onClick={() => setDialogOpen(true)}
+                  className="mt-1 flex items-center gap-1 rounded-lg border border-slate-200 px-3 py-1.5 text-xs font-medium text-slate-600 hover:bg-slate-50 transition"
+                >
+                  <Plus size={12} /> Schedule
+                </button>
+              </div>
+            ) : (
+              dayEvents.map(evt => {
+                const st  = getStatus(evt.start, evt.end);
+                const cfg = STATUS_BADGE[st];
+                const isBusy = busyBot === evt.id;
+
+                return (
+                  <div
+                    key={evt.id}
+                    className={cn(
+                      "rounded-xl border p-3 transition-all",
+                      st === "live"
+                        ? "border-violet-200 bg-violet-50/40"
+                        : "border-slate-200 bg-white hover:border-slate-300 hover:shadow-sm"
+                    )}
+                  >
+                    {/* Title + badge */}
+                    <div className="flex items-start justify-between gap-2 mb-2">
+                      <p className="text-sm font-semibold text-slate-800 leading-snug line-clamp-2">
+                        {evt.title || "Untitled Meeting"}
+                      </p>
+                      <span className={cn(
+                        "flex-shrink-0 rounded-full border px-2 py-0.5 text-[10px] font-semibold",
+                        cfg.cls
+                      )}>
+                        {cfg.label}
+                      </span>
+                    </div>
+
+                    {/* Time + meta */}
+                    <div className="flex flex-wrap items-center gap-2 text-xs text-slate-400 mb-3">
+                      <span className="flex items-center gap-1">
+                        <Clock size={11} /> {formatTime(evt.start)}
+                      </span>
+                      {evt.attendees.length > 0 && (
+                        <span className="flex items-center gap-1">
+                          <Users size={11} /> {evt.attendees.length}
+                        </span>
+                      )}
+                      {evt.platform && (
+                        <span className="flex items-center gap-1">
+                          <Video size={11} /> {evt.platform.replace(/_/g, " ")}
+                        </span>
+                      )}
+                    </div>
+
+                    {/* Bot status */}
+                    {evt.botSent && (
+                      <div className="mb-2 flex items-center gap-1 text-[11px] font-semibold text-emerald-600">
+                        <CheckCircle2 size={11} /> Bot active
+                      </div>
+                    )}
+
+                    {/* Actions */}
+                    <div className="flex gap-2">
+                      {evt.meetingUrl && (
+                        <a
+                          href={evt.meetingUrl}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className={cn(
+                            "flex flex-1 items-center justify-center gap-1 rounded-lg py-1.5 text-xs font-semibold transition",
+                            st === "live"
+                              ? "bg-violet-600 text-white hover:bg-violet-700"
+                              : "bg-slate-900 text-white hover:bg-slate-800"
+                          )}
+                        >
+                          Join
+                        </a>
+                      )}
+                      <button
+                        onClick={() => void sendBot(evt)}
+                        disabled={evt.botSent || isBusy || !evt.meetingUrl}
+                        className="flex flex-1 items-center justify-center gap-1 rounded-lg border border-slate-200 bg-white py-1.5 text-xs font-semibold text-slate-600 hover:border-blue-200 hover:bg-blue-50 hover:text-blue-700 disabled:opacity-40 disabled:cursor-not-allowed transition"
+                      >
+                        {isBusy
+                          ? <Loader2 size={11} className="animate-spin" />
+                          : <Bot size={11} />}
+                        {evt.botSent ? "Sent" : "Send Bot"}
+                      </button>
+                    </div>
+                  </div>
+                );
+              })
             )}
           </div>
         </div>
-      </aside>
+      </div>
 
-      {/* MAIN VIEW: Schedule Feed */}
-      <main className="flex-1 flex flex-col min-w-0 z-10 relative">
-        <header className="h-20 flex items-center justify-between px-8 border-b border-slate-200/80 bg-white/60 backdrop-blur-md sticky top-0 z-30">
-          <div className="flex items-center gap-4">
-            <h1 className="text-2xl font-bold tracking-tight text-slate-900">
-              {selectedDate.toLocaleDateString("en-US", { month: "long", day: "numeric", year: "numeric" })}
-            </h1>
-          </div>
-          <div className="flex items-center gap-3">
-             {connected && (
-               <button
-                 onClick={() => void syncCalendarNow()}
-                 disabled={syncing}
-                 className="inline-flex items-center gap-2 rounded-xl border border-slate-200 bg-white px-4 py-2 text-xs font-bold text-slate-700 transition hover:border-blue-200 hover:text-blue-600 disabled:opacity-50"
-               >
-                 {syncing ? <Loader2 className="h-4 w-4 animate-spin" /> : <ArrowRight className="h-4 w-4" />}
-                 Sync Now
-               </button>
-             )}
-             {connected && (
-               <div className="flex items-center gap-2 px-3 py-1.5 rounded-full bg-emerald-50 border border-emerald-100 shadow-sm">
-                 <div className="h-2 w-2 rounded-full bg-emerald-500 animate-pulse" />
-                 <span className="text-[12px] font-bold text-emerald-700 tracking-wide">LIVE SYNC</span>
-               </div>
-             )}
-          </div>
-        </header>
-
-        <div className="flex-1 overflow-y-auto p-8 custom-scrollbar">
-          <div className="max-w-4xl mx-auto w-full">
-            <AnimatePresence mode="wait">
-              {loading ? (
-                <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} className="flex flex-col items-center justify-center py-40 text-slate-400">
-                  <Loader2 className="animate-spin mb-4 text-blue-500" size={32} />
-                  <p className="text-sm font-medium">Fetching your schedule...</p>
-                </motion.div>
-              ) : selectedDayEvents.length === 0 ? (
-                <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0 }} className="flex flex-col items-center justify-center py-40 text-center border-2 border-dashed border-slate-200 rounded-[2rem] bg-white/50">
-                  <div className="w-16 h-16 bg-slate-50 rounded-2xl flex items-center justify-center border border-slate-100 mb-6 shadow-sm">
-                    <CalendarIcon className="text-slate-400" size={32} />
-                  </div>
-                  <h3 className="text-slate-900 text-xl font-bold tracking-tight">No meetings scheduled</h3>
-                  <p className="text-slate-500 font-medium mt-2 max-w-sm">Enjoy your free time! ZapBot is resting and ready for your next sync.</p>
-                </motion.div>
-              ) : (
-                <motion.div variants={stagger} initial="hidden" animate="visible" className="space-y-4">
-                  {selectedDayEvents.map((evt) => {
-                    const status = getMeetingStatus(evt.start, evt.end);
-                    const isNow = status === "now";
-                    
-                    return (
-                      <motion.div
-                        variants={fadeUpItem}
-                        key={evt.id}
-                        className={cn(
-                          "group relative flex items-center gap-6 p-6 rounded-[1.5rem] border transition-all duration-300 overflow-hidden",
-                          isNow 
-                            ? "bg-blue-50/40 border-blue-200 shadow-md shadow-blue-900/5 ring-1 ring-blue-500/10" 
-                            : "bg-white border-slate-200/80 hover:border-slate-300 hover:shadow-lg hover:shadow-slate-900/5"
-                        )}
-                      >
-                        {/* Status Highlight Bar */}
-                        {isNow && <div className="absolute left-0 top-0 bottom-0 w-1.5 bg-blue-500" />}
-
-                        {/* Timeline Marker */}
-                        <div className="flex flex-col items-center w-16 text-center shrink-0">
-                          <span className={cn(
-                            "text-[13px] font-bold uppercase tracking-tight",
-                            isNow ? "text-blue-700" : "text-slate-900"
-                          )}>
-                            {formatDateTime(evt.start).split(" ")[0]}
-                          </span>
-                          <span className={cn(
-                            "text-[11px] font-semibold mt-0.5",
-                            isNow ? "text-blue-500" : "text-slate-400"
-                          )}>
-                            {formatDateTime(evt.start).split(" ")[1]}
-                          </span>
-                        </div>
-
-                        {/* Event Content */}
-                        <div className="flex-1 min-w-0 py-1">
-                          <h3 className="text-[17px] font-bold text-slate-900 truncate mb-2 tracking-tight">
-                            {evt.title}
-                          </h3>
-                          <div className="flex items-center gap-4 text-[13px] font-medium text-slate-500">
-                            <span className="flex items-center gap-1.5 bg-slate-50 px-2 py-1 rounded-md border border-slate-100">
-                              <Users size={14} className="text-slate-400" />
-                              {evt.attendees.length} participants
-                            </span>
-                            {evt.platform && (
-                              <span className="flex items-center gap-1.5 bg-slate-50 px-2 py-1 rounded-md border border-slate-100 capitalize">
-                                <Video size={14} className="text-slate-400" />
-                                {evt.platform.replace(/_/g, " ")}
-                              </span>
-                            )}
-                            {isNow && (
-                              <span className="flex items-center gap-1.5 text-blue-600 font-bold uppercase tracking-widest text-[10px] bg-blue-100/50 px-2 py-1 rounded-md">
-                                <div className="w-1.5 h-1.5 rounded-full bg-blue-500 animate-pulse" />
-                                In Progress
-                              </span>
-                            )}
-                            {evt.botSent ? (
-                              <span className="flex items-center gap-1.5 text-emerald-600 font-bold uppercase tracking-widest text-[10px] bg-emerald-50 px-2 py-1 rounded-md">
-                                <CheckCircle2 className="h-3.5 w-3.5" />
-                                Bot Sent
-                              </span>
-                            ) : evt.botScheduled ? (
-                              <span className="flex items-center gap-1.5 text-sky-600 font-bold uppercase tracking-widest text-[10px] bg-sky-50 px-2 py-1 rounded-md">
-                                <Clock className="h-3.5 w-3.5" />
-                                Auto Join On
-                              </span>
-                            ) : (
-                              <span className="flex items-center gap-1.5 text-amber-600 font-bold uppercase tracking-widest text-[10px] bg-amber-50 px-2 py-1 rounded-md">
-                                <Info className="h-3.5 w-3.5" />
-                                Needs Bot
-                              </span>
-                            )}
-                          </div>
-                        </div>
-
-                        {/* Actions */}
-                        <div className="flex items-center gap-3 shrink-0">
-                          {evt.meetingUrl && (
-                            <a
-                              href={evt.meetingUrl}
-                              target="_blank"
-                              className={cn(
-                                "h-11 px-5 rounded-xl flex items-center gap-2 text-[13px] font-bold transition-all",
-                                isNow 
-                                  ? "bg-blue-600 text-white hover:bg-blue-700 shadow-[0_4px_14px_0_rgba(59,130,246,0.3)] hover:shadow-[0_6px_20px_rgba(59,130,246,0.23)] hover:-translate-y-[1px]" 
-                                  : "bg-slate-900 text-white hover:bg-slate-800 shadow-sm"
-                              )}
-                            >
-                              Join Meeting
-                              <ChevronRight size={16} />
-                            </a>
-                          )}
-                          <button
-                            onClick={() => dispatchBotForEvent(evt)}
-                            disabled={!evt.meetingUrl || evt.botSent || sendingBotId === evt.id}
-                            className={cn(
-                              "h-11 px-4 flex items-center gap-2 rounded-xl transition-all disabled:opacity-50 disabled:cursor-not-allowed border",
-                              isNow
-                                ? "bg-white border-blue-200 text-blue-600 hover:bg-blue-50 shadow-sm"
-                                : "bg-white border-slate-200 text-slate-500 hover:text-blue-600 hover:border-blue-200 hover:bg-blue-50 shadow-sm"
-                            )}
-                          >
-                            <Bot size={18} />
-                            <span className="text-[13px] font-bold hidden sm:block">{evt.botSent ? "Bot Sent" : "Send Agent"}</span>
-                          </button>
-                        </div>
-
-                        {botMessages[evt.id] && (
-                          <div className="absolute left-28 bottom-2 text-[11px] font-semibold text-blue-500 bg-blue-50 px-2 py-0.5 rounded border border-blue-100">
-                            {botMessages[evt.id]}
-                          </div>
-                        )}
-                      </motion.div>
-                    );
-                  })}
-                </motion.div>
-              )}
-            </AnimatePresence>
+      {/* ── Mobile bottom sheet for selected day ────────────────── */}
+      {dayEvents.length > 0 && (
+        <div className="border-t border-slate-100 bg-white px-4 py-3 md:hidden">
+          <p className="mb-2 text-xs font-semibold text-slate-500">
+            {selected.toLocaleDateString("en-US", { weekday: "short", month: "short", day: "numeric" })}
+          </p>
+          <div className="flex gap-2 overflow-x-auto pb-1">
+            {dayEvents.map(evt => (
+              <div key={evt.id} className="w-44 flex-shrink-0 rounded-xl border border-slate-200 bg-white p-3">
+                <p className="truncate text-xs font-semibold text-slate-800">{evt.title || "Meeting"}</p>
+                <p className="mt-0.5 text-[11px] text-slate-400">{formatTime(evt.start)}</p>
+                <div className="mt-2 flex gap-1.5">
+                  {evt.meetingUrl && (
+                    <a href={evt.meetingUrl} target="_blank" rel="noopener noreferrer"
+                      className="flex-1 rounded-md bg-slate-900 py-1 text-center text-[10px] font-bold text-white">
+                      Join
+                    </a>
+                  )}
+                  <button
+                    onClick={() => void sendBot(evt)}
+                    disabled={evt.botSent || busyBot === evt.id}
+                    className="flex-1 rounded-md border border-slate-200 py-1 text-[10px] font-bold text-slate-600 disabled:opacity-40"
+                  >
+                    {evt.botSent ? "Sent" : "Bot"}
+                  </button>
+                </div>
+              </div>
+            ))}
           </div>
         </div>
-      </main>
+      )}
 
-      <style jsx global>{`
-        .calendar-modern-wrap .react-calendar {
-          width: 100%;
-          background: transparent;
-          border: none;
-          font-family: inherit;
-        }
-        .calendar-modern-wrap .react-calendar__navigation {
-          display: flex;
-          margin-bottom: 1rem;
-        }
-        .calendar-modern-wrap .react-calendar__navigation button {
-          min-width: 32px;
-          height: 32px;
-          background: none;
-          border: none;
-          color: #64748b;
-          font-size: 15px;
-          font-weight: 600;
-          border-radius: 8px;
-          transition: all 0.2s;
-        }
-        .calendar-modern-wrap .react-calendar__navigation button:hover {
-          background: #f1f5f9;
-          color: #0f172a;
-        }
-        .calendar-modern-wrap .react-calendar__month-view__weekdays {
-          text-align: center;
-          font-size: 11px;
-          font-weight: 700;
-          color: #94a3b8;
-          text-transform: uppercase;
-          margin-bottom: 12px;
-        }
-        .calendar-modern-wrap .react-calendar__month-view__weekdays__weekday abbr {
-          text-decoration: none;
-        }
-        .calendar-modern-wrap .react-calendar__tile {
-          padding: 10px 0;
-          background: none;
-          color: #334155;
-          font-size: 13px;
-          font-weight: 500;
-          border-radius: 10px;
-          transition: all 0.2s;
-          position: relative;
-        }
-        .calendar-modern-wrap .react-calendar__tile:hover {
-          background: #f1f5f9;
-          color: #0f172a;
-        }
-        .calendar-modern-wrap .react-calendar__tile--now {
-          background: #eff6ff !important;
-          color: #2563eb !important;
-          font-weight: 700;
-        }
-        .calendar-modern-wrap .react-calendar__tile--active {
-          background: #2563eb !important;
-          color: white !important;
-          font-weight: 700;
-          box-shadow: 0 4px 12px rgba(37, 99, 235, 0.3);
-        }
-        .calendar-modern-wrap .react-calendar__month-view__days__day--neighboringMonth {
-          color: #cbd5e1 !important;
-        }
-        .custom-scrollbar::-webkit-scrollbar { width: 6px; }
-        .custom-scrollbar::-webkit-scrollbar-track { background: transparent; }
-        .custom-scrollbar::-webkit-scrollbar-thumb { background: #cbd5e1; border-radius: 10px; }
-        .custom-scrollbar::-webkit-scrollbar-thumb:hover { background: #94a3b8; }
-      `}</style>
+      <MeetingDialog
+        isOpen={dialogOpen}
+        onClose={() => setDialogOpen(false)}
+        onSuccess={() => void fetchEvents()}
+      />
     </div>
   );
 }
 
 export default function CalendarPage() {
   return (
-    <Suspense fallback={<div className="flex h-screen items-center justify-center"><div className="h-8 w-8 animate-spin rounded-full border-2 border-blue-500 border-t-transparent" /></div>}>
+    <Suspense fallback={
+      <div className="flex h-[calc(100vh-80px)] items-center justify-center">
+        <Loader2 size={24} className="animate-spin text-blue-500" />
+      </div>
+    }>
       <CalendarPageInner />
     </Suspense>
   );

@@ -20,7 +20,7 @@ export async function POST(request: NextRequest) {
 
         const user = await getOrCreateUser(userId);
         const body = await request.json();
-        const { query } = body;
+        const { query, history } = body;
 
         if (!query) {
             return NextResponse.json({ error: "query is required" }, { status: 400 });
@@ -44,7 +44,8 @@ export async function POST(request: NextRequest) {
             const answer = await answerMeetingQuestion({
                 question: query,
                 context: ragResult.context,
-                meetingTitle: "All Meetings"
+                meetingTitle: "All Meetings",
+                history,
             });
             return NextResponse.json({ success: true, answer, backend: "rag-global" });
         }

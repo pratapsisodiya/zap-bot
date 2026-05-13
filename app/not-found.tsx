@@ -1,72 +1,67 @@
 "use client";
 
 import Link from "next/link";
-import { motion } from "framer-motion";
-import { ArrowLeft, Home } from "lucide-react";
+import { ArrowLeft, Home, Zap } from "lucide-react";
 
 export default function NotFound() {
-  return (
-    <div className="relative flex min-h-screen items-center justify-center bg-slate-50 px-6 font-sans overflow-hidden">
-      
-      {/* Background Mesh & Grid (Matching the rest of the app) */}
-      <div className="fixed inset-0 -z-10">
-        <div className="absolute top-0 inset-x-0 h-[800px] bg-[radial-gradient(ellipse_at_top,_var(--tw-gradient-stops))] from-blue-100/60 via-white to-slate-50" />
-        <div className="absolute inset-0 bg-[linear-gradient(to_right,#80808012_1px,transparent_1px),linear-gradient(to_bottom,#80808012_1px,transparent_1px)] bg-[size:24px_24px] [mask-image:radial-gradient(ellipse_60%_50%_at_50%_50%,#000_70%,transparent_100%)]" />
-      </div>
+    return (
+        <div className="relative flex min-h-screen flex-col items-center justify-center overflow-hidden bg-[#f7f8fb] px-6 font-sans">
+            {/* Subtle dot grid */}
+            <div
+                className="pointer-events-none absolute inset-0 opacity-40"
+                style={{
+                    backgroundImage: "radial-gradient(circle, rgba(0,0,0,0.06) 1px, transparent 1px)",
+                    backgroundSize: "24px 24px",
+                    maskImage: "radial-gradient(ellipse 70% 60% at 50% 50%, black 60%, transparent 100%)",
+                }}
+            />
 
-      <div className="relative z-10 w-full max-w-md text-center">
-        
-        {/* Simple 404 Header */}
-        <motion.h1 
-          initial={{ opacity: 0, y: 10 }}
-          animate={{ opacity: 1, y: 0 }}
-          className="text-8xl md:text-9xl font-black tracking-tighter text-slate-200 drop-shadow-sm"
-        >
-          404
-        </motion.h1>
+            {/* Radial glow */}
+            <div className="pointer-events-none absolute inset-0 bg-[radial-gradient(ellipse_60%_40%_at_50%_40%,rgba(14,165,233,0.07),transparent)]" />
 
-        <motion.div
-          initial={{ opacity: 0 }}
-          animate={{ opacity: 1 }}
-          transition={{ delay: 0.1 }}
-        >
-          <h2 className="mt-4 text-3xl font-bold tracking-tight text-slate-900">Page not found</h2>
-          <p className="mt-3 text-[15px] font-medium text-slate-500 leading-relaxed">
-            We couldn't find the page you're looking for. It might have been moved or deleted.
-          </p>
-        </motion.div>
+            <div className="relative z-10 flex w-full max-w-sm flex-col items-center text-center">
+                {/* Logo mark */}
+                <div className="mb-6 flex h-14 w-14 items-center justify-center rounded-2xl border border-[#e6e8ee] bg-white shadow-sm">
+                    <Zap size={24} className="text-[#1f2937]" fill="#1f2937" />
+                </div>
 
-        {/* Action Buttons */}
-        <motion.div 
-          initial={{ opacity: 0, y: 10 }}
-          animate={{ opacity: 1, y: 0 }}
-          transition={{ delay: 0.2 }}
-          className="mt-10 flex flex-col gap-3"
-        >
-          <Link
-            href="/dashboard"
-            className="flex h-12 items-center justify-center rounded-xl bg-slate-900 text-[14px] font-semibold text-white shadow-sm transition-transform hover:bg-slate-800 hover:scale-[1.02] active:scale-95"
-          >
-            Go to Dashboard
-          </Link>
-          
-          <Link
-            href="/"
-            className="flex h-12 items-center justify-center gap-2 rounded-xl border border-slate-200 bg-white text-[14px] font-semibold text-slate-600 shadow-sm transition-colors hover:bg-slate-50 hover:text-slate-900"
-          >
-            <ArrowLeft className="h-4 w-4" />
-            Back to Home
-          </Link>
-        </motion.div>
+                {/* 404 */}
+                <p className="text-[96px] font-black leading-none tracking-tighter text-[#e6e8ee]">
+                    404
+                </p>
 
-        {/* Subtle Branding */}
-        <div className="mt-16 flex items-center justify-center gap-2 opacity-80">
-          <div className="h-1.5 w-1.5 rounded-full bg-slate-300" />
-          <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">
-            ZapBot OS
-          </p>
+                <h1 className="mt-2 text-2xl font-bold tracking-tight text-[#111827]">
+                    Page not found
+                </h1>
+                <p className="mt-3 text-sm leading-relaxed text-[#6b7280]">
+                    We couldn't find the page you're looking for. It may have been moved or deleted.
+                </p>
+
+                {/* Actions */}
+                <div className="mt-8 flex w-full flex-col gap-3">
+                    <Link
+                        href="/dashboard"
+                        className="flex h-11 w-full items-center justify-center gap-2 rounded-xl bg-[#1f2937] text-sm font-semibold text-white transition hover:bg-[#111827] active:scale-[0.98]"
+                    >
+                        <Home size={15} /> Go to Dashboard
+                    </Link>
+                    <Link
+                        href="/"
+                        className="flex h-11 w-full items-center justify-center gap-2 rounded-xl border border-[#e6e8ee] bg-white text-sm font-semibold text-[#374151] transition hover:bg-slate-50 active:scale-[0.98]"
+                    >
+                        <ArrowLeft size={15} /> Back to Home
+                    </Link>
+                </div>
+
+                {/* Footer brand */}
+                <div className="mt-12 flex items-center gap-2 opacity-50">
+                    <div className="flex h-5 w-5 items-center justify-center rounded bg-[#1f2937]">
+                        <Zap size={11} className="text-white" fill="white" />
+                    </div>
+                    <span className="text-xs font-bold text-[#111827]">ZapBot</span>
+                    <span className="text-xs text-[#9ca3af]">· AI Meeting Assistant</span>
+                </div>
+            </div>
         </div>
-      </div>
-    </div>
-  );
+    );
 }
