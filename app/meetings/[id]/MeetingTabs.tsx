@@ -2,7 +2,192 @@
 
 import { useEffect, useMemo, useState } from "react";
 import { cn } from "../../../lib/utils";
-import { Layout, List, BarChart3, Brain, ClipboardCheck, Star, Mail, Zap, MessageSquare, Quote } from "lucide-react";
+import { Layout, List, BarChart3, Brain, ClipboardCheck, Star, Mail, Zap, MessageSquare, Quote, Bot, Mic, FileText, Cpu, CheckCircle2, XCircle, Loader2, Clock } from "lucide-react";
+
+// ── Transcript pipeline status tracker ──────────────────────────────
+
+type StepState = "done" | "active" | "pending" | "failed";
+
+interface PipelineStep {
+    key: string;
+    label: string;
+    sublabel: string;
+    icon: React.ElementType;
+    state: StepState;
+}
+
+function buildPipelineSteps(meeting: any): PipelineStep[] {
+    const status = meeting.botStatus || "pending";
+    const failed = status === "failed";
+    const noTranscript = status === "completed_no_transcript";
+
+    const isDone   = (s: string) => (s as StepState) === "done";
+    const isActive = (s: string) => (s as StepState) === "active";
+
+    const dispatched = meeting.botSent || meeting.botScheduled || status !== "pending";
+    const joined     = meeting.botJoinedAt || ["in_meeting", "recording", "processing", "completed", "completed_no_transcript"].includes(status);
+    const recorded   = meeting.meetingEnded  || ["processing", "completed", "completed_no_transcript"].includes(status);
+    const transcribed = meeting.transcriptReady || ["processing", "completed"].includes(status);
+    const processed  = meeting.processed || status === "completed";
+
+    function stepState(reached: boolean, isCurrentlyActive: boolean): StepState {
+        if (failed && isCurrentlyActive) return "failed";
+        if (noTranscript && isCurrentlyActive) return "failed";
+        if (reached && !isCurrentlyActive) return "done";
+        if (isCurrentlyActive) return "active";
+        return "pending";
+    }
+
+    return [
+        {
+            key: "dispatched",
+            label: "Bot Dispatched",
+            sublabel: dispatched ? "Sent to meeting" : "Waiting to send",
+            icon: Bot,
+            state: dispatched ? "done" : (status === "pending" ? "active" : "pending"),
+        },
+        {
+            key: "joined",
+            label: "Joined Meeting",
+            sublabel: joined ? "Bot is inside" : "Joining room",
+            icon: Mic,
+            state: joined
+                ? "done"
+                : (status === "joining" ? (failed ? "failed" : "active") : "pending"),
+        },
+        {
+            key: "recorded",
+            label: "Recording Done",
+            sublabel: recorded ? "Session captured" : "Recording in progress",
+            icon: FileText,
+            state: recorded
+                ? "done"
+                : (["in_meeting", "recording"].includes(status) ? "active" : "pending"),
+        },
+        {
+            key: "transcribed",
+            label: "Transcript Ready",
+            sublabel: noTranscript
+                ? "No audio detected"
+                : transcribed ? "Text extracted" : "Transcribing audio",
+            icon: MessageSquare,
+            state: noTranscript
+                ? "failed"
+                : transcribed
+                    ? "done"
+                    : (status === "processing" ? "active" : "pending"),
+        },
+        {
+            key: "processed",
+            label: "AI Analysis",
+            sublabel: processed ? "Summary ready" : "Running AI pipeline",
+            icon: Cpu,
+            state: processed
+                ? "done"
+                : (status === "processing" && transcribed ? "active" : "pending"),
+        },
+    ];
+}
+
+function StepIcon({ state, Icon }: { state: StepState; Icon: React.ElementType }) {
+    if (state === "done")   return <CheckCircle2 className="w-4 h-4 text-emerald-400" />;
+    if (state === "failed") return <XCircle className="w-4 h-4 text-red-400" />;
+    if (state === "active") return <Loader2 className="w-4 h-4 text-blue-400 animate-spin" />;
+    return <Icon className="w-4 h-4 text-zinc-600" />;
+}
+
+function TranscriptStatusTracker({ meeting }: { meeting: any }) {
+    const steps = buildPipelineSteps(meeting);
+    const status = meeting.botStatus || "pending";
+    const failed = status === "failed";
+    const noTranscript = status === "completed_no_transcript";
+    const completed = status === "completed";
+
+    const overallLabel = completed
+        ? "Transcript ready"
+        : failed
+        ? "Bot failed — check meeting URL or bot quota"
+        : noTranscript
+        ? "Meeting ended with no audio"
+        : status === "processing"
+        ? "Analysing transcript…"
+        : status === "recording" || status === "in_meeting"
+        ? "Recording in progress"
+        : status === "joining"
+        ? "Bot is joining the meeting"
+        : "Waiting for bot to start";
+
+    const overallColor = completed
+        ? "text-emerald-400"
+        : failed || noTranscript
+        ? "text-red-400"
+        : "text-blue-400";
+
+    return (
+        <div className="rounded-xl border border-white/5 bg-white/[0.02] p-5 mb-6">
+            {/* Header row */}
+            <div className="flex items-center justify-between mb-5">
+                <div className="flex items-center gap-2">
+                    <Clock className="w-4 h-4 text-zinc-500" />
+                    <span className="text-xs font-bold text-zinc-400 uppercase tracking-widest">Transcript Pipeline</span>
+                </div>
+                <span className={cn("text-[11px] font-bold uppercase tracking-widest", overallColor)}>
+                    {overallLabel}
+                </span>
+            </div>
+
+            {/* Steps */}
+            <div className="flex items-start gap-0">
+                {steps.map((step, i) => {
+                    const isLast = i === steps.length - 1;
+                    return (
+                        <div key={step.key} className="flex items-center flex-1 min-w-0">
+                            {/* Step node */}
+                            <div className="flex flex-col items-center gap-1.5 shrink-0">
+                                <div className={cn(
+                                    "w-8 h-8 rounded-full border flex items-center justify-center transition-all",
+                                    step.state === "done"   && "border-emerald-500/40 bg-emerald-500/10",
+                                    step.state === "active" && "border-blue-500/40 bg-blue-500/10 shadow-[0_0_12px_rgba(59,130,246,0.2)]",
+                                    step.state === "failed" && "border-red-500/40 bg-red-500/10",
+                                    step.state === "pending" && "border-zinc-800 bg-zinc-900",
+                                )}>
+                                    <StepIcon state={step.state} Icon={step.icon} />
+                                </div>
+                                <div className="text-center px-1">
+                                    <p className={cn(
+                                        "text-[10px] font-bold uppercase tracking-wider leading-tight",
+                                        step.state === "done"    && "text-emerald-400",
+                                        step.state === "active"  && "text-blue-400",
+                                        step.state === "failed"  && "text-red-400",
+                                        step.state === "pending" && "text-zinc-600",
+                                    )}>{step.label}</p>
+                                    <p className="text-[9px] text-zinc-600 font-medium mt-0.5 leading-tight hidden sm:block">
+                                        {step.sublabel}
+                                    </p>
+                                </div>
+                            </div>
+
+                            {/* Connector line */}
+                            {!isLast && (
+                                <div className={cn(
+                                    "flex-1 h-px mx-2 mt-[-20px] transition-all",
+                                    step.state === "done" ? "bg-emerald-500/30" : "bg-zinc-800"
+                                )} />
+                            )}
+                        </div>
+                    );
+                })}
+            </div>
+
+            {/* Error detail */}
+            {(failed || noTranscript) && meeting.processingError && (
+                <div className="mt-4 px-3 py-2 rounded-lg bg-red-500/5 border border-red-500/10 text-[11px] text-red-400 font-mono break-all">
+                    {meeting.processingError}
+                </div>
+            )}
+        </div>
+    );
+}
 
 export function MeetingTabs({
     meeting: initialMeeting,
@@ -295,11 +480,11 @@ export function MeetingTabs({
 
             {activeTab === "transcript" && (
                 <div className="pro-card p-8 animate-in fade-in slide-in-from-bottom-2 duration-500">
-                    <div className="flex items-center justify-between mb-10">
+                    <div className="flex items-center justify-between mb-6">
                         <div className="flex items-center gap-3">
                             <MessageSquare className="w-5 h-5 text-white" />
                             <h2 className="text-xl font-bold text-white italic tracking-tight">Dialogue</h2>
-                            {transcript?.entries && (
+                            {transcript?.entries && transcript.entries.length > 0 && (
                                 <span className="text-[10px] font-bold text-zinc-600 uppercase tracking-widest bg-zinc-900 border border-white/5 px-2 py-0.5 rounded ml-2">
                                     {transcript.entries.length} Lines
                                 </span>
@@ -312,6 +497,11 @@ export function MeetingTabs({
                             </div>
                         )}
                     </div>
+
+                    {/* Pipeline status — always visible when transcript not ready yet */}
+                    {(!transcript?.entries || transcript.entries.length === 0) && (
+                        <TranscriptStatusTracker meeting={meeting} />
+                    )}
 
                     {transcript?.entries && transcript.entries.length > 0 ? (
                         <div className="space-y-2 h-[600px] overflow-y-auto pr-4 custom-scrollbar">
@@ -338,14 +528,11 @@ export function MeetingTabs({
                             ))}
                         </div>
                     ) : (
-                        <div className="flex flex-col items-center justify-center py-20 text-center gap-4">
-                            <Quote className="w-10 h-10 text-zinc-800" />
-                            <div className="flex flex-col gap-1">
-                                <p className="text-white font-bold italic">Silence in session</p>
-                                <p className="text-xs text-zinc-600 font-medium uppercase tracking-widest">
-                                    {meeting.botStatus === "joining" ? "Awaiting first synchronization..." : "Recordings will manifest here."}
-                                </p>
-                            </div>
+                        <div className="flex flex-col items-center justify-center py-10 text-center gap-3">
+                            <Quote className="w-8 h-8 text-zinc-800" />
+                            <p className="text-xs text-zinc-600 font-medium uppercase tracking-widest">
+                                Transcript lines will appear here once ready.
+                            </p>
                         </div>
                     )}
                 </div>

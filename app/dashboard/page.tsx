@@ -3,9 +3,10 @@
 import { useEffect, useState, useCallback, useRef } from "react";
 import { useUser } from "@clerk/nextjs";
 import { useRouter } from "next/navigation";
-import { CalendarDays, Filter, Plus, MoreVertical, Flame, Bot, Loader2 } from "lucide-react";
+import { CalendarDays, Filter, Plus, MoreVertical, Flame, Bot, Loader2, LayoutGrid } from "lucide-react";
 import dynamic from "next/dynamic";
 import MeetingDialog from "@/components/MeetingDialog";
+import DashboardCustomizer, { type WidgetPrefs } from "@/components/DashboardCustomizer";
 import { cn } from "@/lib/utils";
 
 // Single dynamic import for all recharts — avoids 9 separate chunks
@@ -62,11 +63,37 @@ const EMPTY_STATS: DashboardStats = {
     upcomingStatusCounts: { scheduled: 0, needsBot: 0, live: 0 },
 };
 
+const WIDGETS = [
+    { id: "stat-cards",      label: "Overview Stats",   desc: "4 key metrics at a glance" },
+    { id: "charts",          label: "Activity Charts",  desc: "Weekly trend + bot status" },
+    { id: "recent-meetings", label: "Recent Meetings",  desc: "Last 4 meetings" },
+] as const;
+
+const WIDGET_IDS = WIDGETS.map((w) => w.id);
+const LS_WIDGETS_KEY = "zapbot.dashboard.widgets";
+
+function loadWidgetPrefs(): WidgetPrefs {
+    try {
+        const raw = typeof window !== "undefined" ? localStorage.getItem(LS_WIDGETS_KEY) : null;
+        if (!raw) return { order: [...WIDGET_IDS], hidden: [] };
+        const parsed = JSON.parse(raw) as Partial<WidgetPrefs>;
+        const order = Array.isArray(parsed.order) && parsed.order.every((id) => WIDGET_IDS.includes(id as any))
+            ? parsed.order
+            : [...WIDGET_IDS];
+        const hidden = Array.isArray(parsed.hidden) ? parsed.hidden.filter((id) => WIDGET_IDS.includes(id as any)) : [];
+        return { order, hidden };
+    } catch {
+        return { order: [...WIDGET_IDS], hidden: [] };
+    }
+}
+
 export default function DashboardPage() {
     const { user } = useUser();
     const router = useRouter();
     const firstName = user?.firstName || "Operator";
     const [isDialogOpen, setIsDialogOpen] = useState(false);
+    const [customizerOpen, setCustomizerOpen] = useState(false);
+    const [widgetPrefs, setWidgetPrefs] = useState<WidgetPrefs>({ order: [...WIDGET_IDS], hidden: [] });
     const [isLoading, setIsLoading] = useState(true);
     const [autoJoin, setAutoJoin] = useState<boolean | null>(null);
     const [autoJoinSaving, setAutoJoinSaving] = useState(false);
@@ -74,6 +101,16 @@ export default function DashboardPage() {
     const [weeklyTrend, setWeeklyTrend] = useState<WeeklyPoint[]>([]);
     const [recentMeetings, setRecentMeetings] = useState<RecentMeeting[]>([]);
     const loadedRef = useRef(false);
+
+    // Load widget prefs from localStorage on mount (client-only)
+    useEffect(() => {
+        setWidgetPrefs(loadWidgetPrefs());
+    }, []);
+
+    const handleWidgetPrefsChange = useCallback((prefs: WidgetPrefs) => {
+        setWidgetPrefs(prefs);
+        try { localStorage.setItem(LS_WIDGETS_KEY, JSON.stringify(prefs)); } catch { /* ignore */ }
+    }, []);
 
     const toggleAutoJoin = useCallback(async () => {
         const next = !autoJoin;
@@ -185,6 +222,12 @@ export default function DashboardPage() {
                             <Filter size={14} strokeWidth={2.2} /> Filter
                         </button>
                         <button
+                            onClick={() => setCustomizerOpen(true)}
+                            className="inline-flex items-center gap-2 rounded-lg border border-[#e5e7eb] bg-white px-3 py-2 text-xs font-semibold text-[#374151] hover:bg-[#f9fafb] transition-colors"
+                        >
+                            <LayoutGrid size={14} strokeWidth={2.2} /> Customize
+                        </button>
+                        <button
                             onClick={() => setIsDialogOpen(true)}
                             className="inline-flex items-center gap-2 rounded-lg bg-[#1f2937] px-3 py-2 text-xs font-semibold text-white hover:bg-[#111827]"
                         >
@@ -202,74 +245,94 @@ export default function DashboardPage() {
                     </p>
                 </div>
 
-                <div className="grid grid-cols-1 gap-3 md:grid-cols-2 xl:grid-cols-4">
-                    {isLoading ? (
-                        Array.from({ length: 4 }).map((_, idx) => (
-                            <div key={idx} className="animate-pulse rounded-xl border border-[#e6e8ee] bg-white p-4">
-                                <div className="flex items-center gap-2 mb-2">
-                                    <div className="h-7 w-7 rounded-md bg-slate-200" />
-                                    <div className="h-4 w-24 rounded bg-slate-200" />
-                                </div>
-                                <div className="h-10 w-16 rounded bg-slate-200" />
-                                <div className="mt-1 h-4 w-20 rounded bg-slate-200" />
-                            </div>
-                        ))
-                    ) : (
-                        cards.map((card) => (
-                            <div key={card.label} className="rounded-xl border border-[#e6e8ee] bg-white p-4">
-                                <div className="flex items-center justify-between">
-                                    <div className="flex items-center gap-2">
-                                        <div className={`h-7 w-7 rounded-md ${card.color}`} />
-                                        <p className="text-[15px] font-semibold text-[#1f2937]">{card.label}</p>
-                                    </div>
-                                    <MoreVertical size={16} className="text-[#9ca3af]" />
-                                </div>
-                                <p className="mt-2 text-[34px] font-bold leading-none text-[#111827]">{card.value}</p>
-                                <p className="mt-1 text-sm text-[#6b7280]">{card.sub}</p>
-                            </div>
-                        ))
-                    )}
-                </div>
+                {widgetPrefs.order.map((widgetId) => {
+                    if (widgetPrefs.hidden.includes(widgetId)) return null;
 
-                <Charts weeklyTrend={weeklyTrend} statusBars={statusBars} />
-
-                <div className="rounded-xl border border-[#e6e8ee] bg-white p-4">
-                    <div className="mb-3 flex items-center justify-between">
-                        <h3 className="text-[22px] font-semibold text-[#111827]">Recent Meetings</h3>
-                        <button
-                            onClick={() => router.push("/dashboard/meetings")}
-                            className="inline-flex items-center gap-2 rounded-lg border border-[#e5e7eb] bg-white px-3 py-1.5 text-xs font-semibold text-[#4b5563]"
-                        >
-                            View All
-                        </button>
-                    </div>
-                    <div className="grid grid-cols-1 gap-3 md:grid-cols-3 lg:grid-cols-4">
-                        {isLoading ? (
-                            <p className="col-span-full text-center text-sm text-[#6b7280]">Loading meetings...</p>
-                        ) : recentMeetings.length === 0 ? (
-                            <p className="col-span-full text-center text-sm text-[#6b7280]">No recent meetings found</p>
-                        ) : (
-                            recentMeetings.map((meeting) => (
-                                <div key={meeting.id} className="rounded-lg border border-[#e6e8ee] bg-[#fcfcfd] p-3">
-                                    <div className="flex items-start justify-between gap-2">
-                                        <p className="truncate text-sm font-semibold text-[#111827]">{meeting.title || "Untitled Meeting"}</p>
-                                        <MoreVertical size={14} className="text-[#9ca3af]" />
+                    if (widgetId === "stat-cards") return (
+                        <div key="stat-cards" className="grid grid-cols-1 gap-3 md:grid-cols-2 xl:grid-cols-4">
+                            {isLoading ? (
+                                Array.from({ length: 4 }).map((_, idx) => (
+                                    <div key={idx} className="animate-pulse rounded-xl border border-[#e6e8ee] bg-white p-4">
+                                        <div className="flex items-center gap-2 mb-2">
+                                            <div className="h-7 w-7 rounded-md bg-slate-200" />
+                                            <div className="h-4 w-24 rounded bg-slate-200" />
+                                        </div>
+                                        <div className="h-10 w-16 rounded bg-slate-200" />
+                                        <div className="mt-1 h-4 w-20 rounded bg-slate-200" />
                                     </div>
-                                    <p className="mt-1 text-xs text-[#6b7280]">{formatMeetingMeta(meeting)}</p>
-                                    <span className="mt-3 inline-block rounded-full bg-indigo-50 px-2 py-1 text-[10px] font-semibold text-indigo-600">
-                                        {meeting.transcriptReady ? "Summary Ready" : meeting.hasRecording ? "Recording Ready" : "Scheduled"}
-                                    </span>
-                                </div>
-                            ))
-                        )}
-                    </div>
-                </div>
+                                ))
+                            ) : (
+                                cards.map((card) => (
+                                    <div key={card.label} className="rounded-xl border border-[#e6e8ee] bg-white p-4">
+                                        <div className="flex items-center justify-between">
+                                            <div className="flex items-center gap-2">
+                                                <div className={`h-7 w-7 rounded-md ${card.color}`} />
+                                                <p className="text-[15px] font-semibold text-[#1f2937]">{card.label}</p>
+                                            </div>
+                                            <MoreVertical size={16} className="text-[#9ca3af]" />
+                                        </div>
+                                        <p className="mt-2 text-[34px] font-bold leading-none text-[#111827]">{card.value}</p>
+                                        <p className="mt-1 text-sm text-[#6b7280]">{card.sub}</p>
+                                    </div>
+                                ))
+                            )}
+                        </div>
+                    );
+
+                    if (widgetId === "charts") return (
+                        <Charts key="charts" weeklyTrend={weeklyTrend} statusBars={statusBars} />
+                    );
+
+                    if (widgetId === "recent-meetings") return (
+                        <div key="recent-meetings" className="rounded-xl border border-[#e6e8ee] bg-white p-4">
+                            <div className="mb-3 flex items-center justify-between">
+                                <h3 className="text-[22px] font-semibold text-[#111827]">Recent Meetings</h3>
+                                <button
+                                    onClick={() => router.push("/dashboard/meetings")}
+                                    className="inline-flex items-center gap-2 rounded-lg border border-[#e5e7eb] bg-white px-3 py-1.5 text-xs font-semibold text-[#4b5563]"
+                                >
+                                    View All
+                                </button>
+                            </div>
+                            <div className="grid grid-cols-1 gap-3 md:grid-cols-3 lg:grid-cols-4">
+                                {isLoading ? (
+                                    <p className="col-span-full text-center text-sm text-[#6b7280]">Loading meetings...</p>
+                                ) : recentMeetings.length === 0 ? (
+                                    <p className="col-span-full text-center text-sm text-[#6b7280]">No recent meetings found</p>
+                                ) : (
+                                    recentMeetings.map((meeting) => (
+                                        <div key={meeting.id} className="rounded-lg border border-[#e6e8ee] bg-[#fcfcfd] p-3">
+                                            <div className="flex items-start justify-between gap-2">
+                                                <p className="truncate text-sm font-semibold text-[#111827]">{meeting.title || "Untitled Meeting"}</p>
+                                                <MoreVertical size={14} className="text-[#9ca3af]" />
+                                            </div>
+                                            <p className="mt-1 text-xs text-[#6b7280]">{formatMeetingMeta(meeting)}</p>
+                                            <span className="mt-3 inline-block rounded-full bg-indigo-50 px-2 py-1 text-[10px] font-semibold text-indigo-600">
+                                                {meeting.transcriptReady ? "Summary Ready" : meeting.hasRecording ? "Recording Ready" : "Scheduled"}
+                                            </span>
+                                        </div>
+                                    ))
+                                )}
+                            </div>
+                        </div>
+                    );
+
+                    return null;
+                })}
             </div>
 
             <MeetingDialog
                 isOpen={isDialogOpen}
                 onClose={() => setIsDialogOpen(false)}
                 onSuccess={() => void loadData()}
+            />
+
+            <DashboardCustomizer
+                open={customizerOpen}
+                widgets={WIDGETS}
+                prefs={widgetPrefs}
+                onChange={handleWidgetPrefsChange}
+                onClose={() => setCustomizerOpen(false)}
             />
 
             <style jsx global>{`

@@ -85,7 +85,7 @@ export class MeetingBaaSClient {
             method,
             headers: {
                 "Content-Type": "application/json",
-                Authorization: `Bearer ${this.apiKey}`,
+                "x-meeting-baas-api-key": this.apiKey,
             },
             body: body ? JSON.stringify(body) : undefined,
         });

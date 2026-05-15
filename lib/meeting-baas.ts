@@ -237,7 +237,9 @@ export async function getBotRecording(botId: string): Promise<string | null> {
 }
 
 /**
- * Get transcript from bot
+ * Get transcript from bot.
+ * Meeting Baas does not have a dedicated /transcript endpoint — the transcript
+ * is returned inside the bot details object at GET /v2/bots/{botId}.
  */
 export async function getBotTranscript(botId: string): Promise<any | null> {
     const apiKey = getApiKey();
@@ -248,16 +250,20 @@ export async function getBotTranscript(botId: string): Promise<any | null> {
     if (isMockMode() || botId.startsWith("mock-bot")) return null;
 
     try {
-        // Meeting BaaS provides transcripts, usually available via webhook or a specific endpoint
-        const response = await fetch(`https://api.meetingbaas.com/v2/bots/${botId}/transcript`, {
+        const response = await fetch(`https://api.meetingbaas.com/v2/bots/${botId}`, {
             headers: {
                 "x-meeting-baas-api-key": apiKey,
             },
         });
 
-        if (!response.ok) return null;
+        if (!response.ok) {
+            console.warn(`getBotTranscript: Meeting Baas returned ${response.status} for bot ${botId}`);
+            return null;
+        }
 
-        return await response.json();
+        const data = await response.json();
+        // The transcript array lives directly on the bot object
+        return data.transcript ?? null;
     } catch (error) {
         console.error("Error fetching bot transcript:", error);
         return null;
