@@ -1,27 +1,29 @@
 {
   "name": "zap-bot",
   "version": "0.1.0",
-  "type": "module",
   "private": true,
   "scripts": {
-    "dev": "next dev --webpack --port 3000",
+    "dev": "next dev --port 3000",
     "build": "next build",
     "start": "next start",
     "lint": "eslint --max-warnings 0",
     "test": "vitest run",
-    "check-types": "next typegen && tsc --noEmit",
+    "check-types": "tsc --noEmit",
     "appwrite:setup": "node ./scripts/setup-appwrite-schema.mjs",
     "dev:api": "pnpm --filter api dev",
     "start:api": "pnpm --filter api start",
     "dev:all": "turbo run dev",
     "format": "prettier --write \"**/*.{ts,tsx,md}\"",
-    "check-types:api": "pnpm --filter api check-types"
+    "check-types:api": "pnpm --filter api check-types",
+    "deploy": "node ./scripts/deploy-cloudflare.mjs",
+    "deploy:cf": "node ./scripts/deploy-cloudflare.mjs",
+    "deploy:cf:preview": "node ./scripts/deploy-cloudflare.mjs --preview"
   },
   "dependencies": {
     "@aws-sdk/client-lambda": "^3.705.0",
     "@aws-sdk/client-s3": "^3.705.0",
     "@aws-sdk/s3-request-presigner": "^3.705.0",
-    "@clerk/nextjs": "^7.0.1",
+    "@clerk/nextjs": "^7.2.4",
     "@pinecone-database/pinecone": "^7.1.0",
     "@radix-ui/react-slot": "^1.2.4",
     "@react-email/components": "^1.0.8",
@@ -72,5 +74,6 @@
   },
   "engines": {
     "node": ">=18"
-  }
+  },
+  "packageManager": "pnpm@10.28.0+sha512.05df71d1421f21399e053fde567cea34d446fa02c76571441bfc1c7956e98e363088982d940465fd34480d4d90a0668bc12362f8aa88000a64e83d0b0e47be48"
 }
